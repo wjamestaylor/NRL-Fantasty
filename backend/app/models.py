@@ -83,3 +83,57 @@ class TradeRecommendationResponse(BaseModel):
 class TradeSimulationRequest(BaseModel):
     team: UserTeamImportRequest
     trades: list[TradePair]
+
+
+class ByeRoundCoverage(BaseModel):
+    round: int
+    available_count: int = Field(ge=0)
+    bye_count: int = Field(ge=0)
+    coverage_ratio: float
+
+
+class CashGenerationOutlook(BaseModel):
+    projected_price_change: int
+    projected_cash_generation: int
+    rising_players: list[str]
+    falling_players: list[str]
+    avg_breakeven_gap: float
+
+
+class SquadStructureScore(BaseModel):
+    dual_position_count: int = Field(ge=0)
+    position_counts: dict[str, int]
+    position_flexibility_score: float
+    squad_balance_score: float
+
+
+class RoundSimulation(BaseModel):
+    round: int
+    trades: list[TradePair]
+    projected_points_delta: float
+    projected_cash_delta: int
+    bank_after: int
+    risk_score: float
+
+
+class ScenarioPlannerResult(BaseModel):
+    scenario: Literal["conservative", "balanced", "aggressive"]
+    rounds: list[RoundSimulation]
+    total_projected_points_delta: float
+    total_projected_cash_delta: int
+    avg_risk_score: float
+    bye_coverage_score: float
+    position_flexibility_score: float
+
+
+class PlannerPlanRequest(UserTeamImportRequest):
+    planning_horizon: int = Field(default=3, ge=1, le=6)
+    compare_all_scenarios: bool = False
+
+
+class PlannerPlanResponse(BaseModel):
+    planning_horizon: int
+    bye_coverage: list[ByeRoundCoverage]
+    cash_generation: CashGenerationOutlook
+    squad_structure: SquadStructureScore
+    scenarios: list[ScenarioPlannerResult]

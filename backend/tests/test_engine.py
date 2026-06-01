@@ -1,5 +1,12 @@
-from app.engine import _risk_label, project_player, recommend_trades
-from app.models import Player, UserTeamImportRequest
+from app.engine import (
+    _risk_label,
+    build_planner_plan,
+    cash_generation_outlook,
+    project_player,
+    recommend_trades,
+    squad_structure_score,
+)
+from app.models import PlannerPlanRequest, Player, UserTeamImportRequest
 
 
 def test_projection_formula_matches_v1_weights() -> None:
@@ -159,3 +166,112 @@ def test_risk_label_thresholds() -> None:
     assert _risk_label(0.99) == "medium"
     assert _risk_label(1.0) == "high"
     assert _risk_label(2.5) == "high"
+
+
+def test_cash_generation_outlook_returns_risers_and_fallers() -> None:
+    player_up = Player(
+        id="UP",
+        name="Riser",
+        team="A",
+        positions=["MID"],
+        price=500000,
+        season_average=58,
+        last_3_average=60,
+        minutes_adjusted_base=59,
+        opponent_modifier=2,
+        role_change_modifier=1,
+        role_risk=0.1,
+        injury_risk=0.1,
+        job_security_risk=0.1,
+        breakeven=35,
+        price_history=[{"round": 1, "price": 480000}, {"round": 2, "price": 500000}],
+    )
+    player_down = Player(
+        id="DOWN",
+        name="Faller",
+        team="B",
+        positions=["EDG"],
+        price=520000,
+        season_average=42,
+        last_3_average=39,
+        minutes_adjusted_base=40,
+        opponent_modifier=-1,
+        role_change_modifier=-2,
+        role_risk=0.3,
+        injury_risk=0.3,
+        job_security_risk=0.2,
+        breakeven=60,
+        price_history=[{"round": 1, "price": 540000}, {"round": 2, "price": 520000}],
+    )
+
+    outlook = cash_generation_outlook([player_up, player_down], "balanced")
+
+    assert "UP" in outlook.rising_players
+    assert "DOWN" in outlook.falling_players
+    assert outlook.projected_price_change != 0
+
+
+def test_build_planner_plan_can_compare_all_scenarios() -> None:
+    request = PlannerPlanRequest(
+        squad=["P1", "P2", "P3", "P4"],
+        bank=200000,
+        trades_available=2,
+        boosts_available=1,
+        strategy="balanced",
+        planning_horizon=3,
+        compare_all_scenarios=True,
+    )
+
+    plan = build_planner_plan(request)
+
+    assert plan.planning_horizon == 3
+    assert len(plan.bye_coverage) == 3
+    assert plan.cash_generation.avg_breakeven_gap is not None
+    assert plan.squad_structure.position_flexibility_score >= 0
+    assert {scenario.scenario for scenario in plan.scenarios} == {
+        "conservative",
+        "balanced",
+        "aggressive",
+    }
+    assert all(len(scenario.rounds) == 3 for scenario in plan.scenarios)
+
+
+def test_squad_structure_score_counts_dual_positions() -> None:
+    structure = squad_structure_score(
+        [
+            Player(
+                id="A",
+                name="Dual",
+                team="A",
+                positions=["MID", "EDG"],
+                price=400000,
+                season_average=45,
+                last_3_average=46,
+                minutes_adjusted_base=45,
+                opponent_modifier=0,
+                role_change_modifier=0,
+                role_risk=0.1,
+                injury_risk=0.1,
+                job_security_risk=0.1,
+            ),
+            Player(
+                id="B",
+                name="Single",
+                team="A",
+                positions=["HOK"],
+                price=430000,
+                season_average=48,
+                last_3_average=47,
+                minutes_adjusted_base=46,
+                opponent_modifier=0,
+                role_change_modifier=0,
+                role_risk=0.1,
+                injury_risk=0.1,
+                job_security_risk=0.1,
+            ),
+        ]
+    )
+
+    assert structure.dual_position_count == 1
+    assert structure.position_counts["MID"] == 1
+    assert structure.position_counts["HOK"] == 1

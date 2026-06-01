@@ -148,3 +148,35 @@ def test_trade_recommend_endpoint_with_zero_bank_only_free_moves() -> None:
         assert rec["cash_impact"] >= 0
 
 
+def test_planner_bye_endpoint_returns_round_mapping() -> None:
+    response = client.get("/planner/bye")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "bye_rounds" in payload
+    assert isinstance(payload["bye_rounds"], dict)
+
+
+def test_planner_plan_endpoint_returns_phase4_payload() -> None:
+    payload = {
+        "squad": ["P1", "P2", "P3", "P4"],
+        "bank": 200000,
+        "trades_available": 2,
+        "boosts_available": 1,
+        "strategy": "balanced",
+        "planning_horizon": 3,
+        "compare_all_scenarios": True,
+    }
+
+    response = client.post("/planner/plan", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["planning_horizon"] == 3
+    assert len(data["bye_coverage"]) == 3
+    assert "projected_cash_generation" in data["cash_generation"]
+    assert "position_flexibility_score" in data["squad_structure"]
+    scenarios = {scenario["scenario"] for scenario in data["scenarios"]}
+    assert scenarios == {"conservative", "balanced", "aggressive"}
+    assert all(len(scenario["rounds"]) == 3 for scenario in data["scenarios"])
+
