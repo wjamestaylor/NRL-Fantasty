@@ -19,6 +19,7 @@ class Player(BaseModel):
     role_risk: float
     injury_risk: float
     job_security_risk: float
+    breakeven: int | None = None
     bye_rounds: list[int] = Field(default_factory=list)
     status: str = "available"
 

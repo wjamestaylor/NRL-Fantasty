@@ -81,7 +81,7 @@ uvicorn app.main:app --reload
 
 The backend now loads player, fixture, and news data from configurable live feeds with a validated historical snapshot fallback.
 
-- `NRL_PLAYERS_FEED_URL` -> live player stats feed (JSON array of `Player` objects)
+- `NRL_PLAYERS_FEED_URL` -> live player stats feed (JSON array of `Player` objects, optional `breakeven` per player)
 - `NRL_FIXTURES_FEED_URL` -> live fixture feed (JSON array of `Fixture` objects)
 - `NRL_NEWS_FEED_URL` -> live news/alerts feed (JSON array of `NewsSignal` objects)
 
@@ -90,6 +90,8 @@ If any live source is unavailable, the API automatically falls back to validated
 - `backend/data/players_snapshot.json`
 - `backend/data/fixtures_snapshot.json`
 - `backend/data/news_snapshot.json`
+
+Breakeven support is automatically enabled only when every loaded player has `breakeven` populated. If coverage is incomplete, breakeven is disabled and omitted from player payloads to avoid partial/incorrect insight.
 
 You can refresh snapshots from live feeds for full-season coverage and late changes using:
 
@@ -104,6 +106,12 @@ python -m app.feed_ingestion
 Recommended production automation:
 - schedule snapshot refresh at least daily during the season
 - add an extra run shortly after team-list announcements (typically Tuesday evening AEST) to capture late role/injury changes
+
+Feature capability is exposed at `GET /health/data-sources` under:
+
+- `features.player_breakeven.enabled`
+- `features.player_breakeven.reason`
+- `features.player_breakeven.coverage`
 
 ## Frontend (Next.js)
 
@@ -120,6 +128,8 @@ Available MVP screens:
 - `/player-research`
 - `/planner`
 - `/news`
+
+Set `NRL_API_BASE_URL` in `frontend` to enable server-side feature checks (including conditional breakeven visibility on `/player-research`).
 
 ## Tests
 
