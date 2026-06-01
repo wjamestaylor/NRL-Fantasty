@@ -1,0 +1,5 @@
+[
+  {"player_id": "P3", "signal": "named in starting side", "confidence": "high"},
+  {"player_id": "P6", "signal": "middle rotation upside", "confidence": "medium"},
+  {"player_id": "P7", "signal": "edge role locked", "confidence": "high"}
+]

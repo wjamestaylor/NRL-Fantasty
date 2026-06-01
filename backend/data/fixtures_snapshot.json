@@ -1,0 +1,10 @@
+[
+  {"round": 1, "home_team": "Broncos", "away_team": "Roosters"},
+  {"round": 1, "home_team": "Sea Eagles", "away_team": "Rabbitohs"},
+  {"round": 1, "home_team": "Storm", "away_team": "Panthers"},
+  {"round": 1, "home_team": "Eels", "away_team": "Bulldogs"},
+  {"round": 1, "home_team": "Knights", "away_team": "Raiders"},
+  {"round": 1, "home_team": "Sharks", "away_team": "Warriors"},
+  {"round": 1, "home_team": "Dolphins", "away_team": "Cowboys"},
+  {"round": 1, "home_team": "Dragons", "away_team": "Titans"}
+]
