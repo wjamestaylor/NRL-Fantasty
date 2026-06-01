@@ -147,3 +147,64 @@ def test_refresh_snapshots_from_live_feeds_writes_validated_snapshots(
     assert bundle.source_health["players"]["status"] == "live"
     assert bundle.source_health["fixtures"]["status"] == "live"
     assert bundle.source_health["news"]["status"] == "live"
+
+
+def test_load_feed_bundle_enriches_players_with_supplemental_snapshots(
+    tmp_path: Path, monkeypatch
+) -> None:
+    players_path = tmp_path / "players.json"
+    fixtures_path = tmp_path / "fixtures.json"
+    news_path = tmp_path / "news.json"
+    player_price_history_path = tmp_path / "player_price_history.json"
+    player_game_details_path = tmp_path / "player_game_details.json"
+
+    _write_snapshot(
+        players_path,
+        [
+            {
+                "id": "P1",
+                "name": "Cameron Murray",
+                "team": "Rabbitohs",
+                "positions": ["MID"],
+                "price": 760000,
+                "season_average": 60,
+                "last_3_average": 62,
+                "minutes_adjusted_base": 61,
+                "opponent_modifier": 2,
+                "role_change_modifier": 0,
+                "role_risk": 0.1,
+                "injury_risk": 0.1,
+                "job_security_risk": 0.02,
+                "bye_rounds": [13],
+            }
+        ],
+    )
+    _write_snapshot(fixtures_path, [{"round": 1, "home_team": "Broncos", "away_team": "Roosters"}])
+    _write_snapshot(news_path, [{"player_id": "P1", "signal": "fit", "confidence": "high"}])
+    _write_snapshot(
+        player_price_history_path,
+        [{"player_id": "P1", "price_history": [{"round": 1, "price": 750000}]}],
+    )
+    _write_snapshot(
+        player_game_details_path,
+        [{"player_id": "P1", "game_details": [{"round": 1, "score": 55, "minutes": 67}]}],
+    )
+
+    monkeypatch.setenv(feed_ingestion.PLAYERS_SNAPSHOT_PATH_ENV, str(players_path))
+    monkeypatch.setenv(feed_ingestion.FIXTURES_SNAPSHOT_PATH_ENV, str(fixtures_path))
+    monkeypatch.setenv(feed_ingestion.NEWS_SNAPSHOT_PATH_ENV, str(news_path))
+    monkeypatch.setenv(
+        feed_ingestion.PLAYER_PRICE_HISTORY_SNAPSHOT_PATH_ENV,
+        str(player_price_history_path),
+    )
+    monkeypatch.setenv(
+        feed_ingestion.PLAYER_GAME_DETAILS_SNAPSHOT_PATH_ENV,
+        str(player_game_details_path),
+    )
+
+    bundle = feed_ingestion.load_feed_bundle()
+
+    assert bundle.players[0].price_history[0].price == 750000
+    assert bundle.players[0].game_details[0].minutes == 67
+    assert bundle.source_health["player_price_history"]["status"] == "snapshot"
+    assert bundle.source_health["player_game_details"]["status"] == "snapshot"

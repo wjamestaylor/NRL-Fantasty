@@ -16,14 +16,20 @@ DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 DEFAULT_PLAYERS_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "players_snapshot.json"
 DEFAULT_FIXTURES_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "fixtures_snapshot.json"
 DEFAULT_NEWS_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "news_snapshot.json"
+DEFAULT_PLAYER_PRICE_HISTORY_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "player_price_history_snapshot.json"
+DEFAULT_PLAYER_GAME_DETAILS_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "player_game_details_snapshot.json"
 
 PLAYERS_FEED_URL_ENV = "NRL_PLAYERS_FEED_URL"
 FIXTURES_FEED_URL_ENV = "NRL_FIXTURES_FEED_URL"
 NEWS_FEED_URL_ENV = "NRL_NEWS_FEED_URL"
+PLAYER_PRICE_HISTORY_FEED_URL_ENV = "NRL_PLAYER_PRICE_HISTORY_FEED_URL"
+PLAYER_GAME_DETAILS_FEED_URL_ENV = "NRL_PLAYER_GAME_DETAILS_FEED_URL"
 
 PLAYERS_SNAPSHOT_PATH_ENV = "NRL_PLAYERS_SNAPSHOT_PATH"
 FIXTURES_SNAPSHOT_PATH_ENV = "NRL_FIXTURES_SNAPSHOT_PATH"
 NEWS_SNAPSHOT_PATH_ENV = "NRL_NEWS_SNAPSHOT_PATH"
+PLAYER_PRICE_HISTORY_SNAPSHOT_PATH_ENV = "NRL_PLAYER_PRICE_HISTORY_SNAPSHOT_PATH"
+PLAYER_GAME_DETAILS_SNAPSHOT_PATH_ENV = "NRL_PLAYER_GAME_DETAILS_SNAPSHOT_PATH"
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,52 @@ def _validate_payload(
     return [model_type.model_validate(item) for item in payload]
 
 
+def _normalize_player_supplemental_payload(payload: Any, key: str) -> dict[str, list[dict[str, Any]]]:
+    if isinstance(payload, dict):
+        return {
+            str(player_id): [entry for entry in records if isinstance(entry, dict)]
+            for player_id, records in payload.items()
+            if isinstance(records, list)
+        }
+
+    if isinstance(payload, list):
+        normalized: dict[str, list[dict[str, Any]]] = {}
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            player_id = item.get("player_id")
+            records = item.get(key)
+            if not player_id or not isinstance(records, list):
+                continue
+            normalized[str(player_id)] = [entry for entry in records if isinstance(entry, dict)]
+        return normalized
+
+    return {}
+
+
+def _load_optional_player_supplemental_dataset(
+    name: str,
+    key: str,
+    feed_url: str | None,
+    snapshot_path: Path,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, str]]:
+    if feed_url:
+        try:
+            payload = _fetch_json(feed_url)
+            records = _normalize_player_supplemental_payload(payload, key)
+            return records, {"status": "live", "source": feed_url, "dataset": name}
+        except RuntimeError:
+            pass
+
+    if snapshot_path.exists():
+        payload = _load_json_file(snapshot_path)
+        records = _normalize_player_supplemental_payload(payload, key)
+        source_type = "snapshot_fallback" if feed_url else "snapshot"
+        return records, {"status": source_type, "source": str(snapshot_path), "dataset": name}
+
+    return {}, {"status": "not_configured", "source": "none", "dataset": name}
+
+
 def _load_dataset(
     name: str,
     model_type: type[Player] | type[Fixture] | type[NewsSignal],
@@ -101,6 +153,14 @@ def load_feed_bundle() -> FeedBundle:
     players_snapshot = _snapshot_path(PLAYERS_SNAPSHOT_PATH_ENV, DEFAULT_PLAYERS_SNAPSHOT_PATH)
     fixtures_snapshot = _snapshot_path(FIXTURES_SNAPSHOT_PATH_ENV, DEFAULT_FIXTURES_SNAPSHOT_PATH)
     news_snapshot = _snapshot_path(NEWS_SNAPSHOT_PATH_ENV, DEFAULT_NEWS_SNAPSHOT_PATH)
+    player_price_history_snapshot = _snapshot_path(
+        PLAYER_PRICE_HISTORY_SNAPSHOT_PATH_ENV,
+        DEFAULT_PLAYER_PRICE_HISTORY_SNAPSHOT_PATH,
+    )
+    player_game_details_snapshot = _snapshot_path(
+        PLAYER_GAME_DETAILS_SNAPSHOT_PATH_ENV,
+        DEFAULT_PLAYER_GAME_DETAILS_SNAPSHOT_PATH,
+    )
 
     players, players_health = _load_dataset(
         name="players",
@@ -120,15 +180,42 @@ def load_feed_bundle() -> FeedBundle:
         feed_url=os.getenv(NEWS_FEED_URL_ENV),
         snapshot_path=news_snapshot,
     )
+    price_history_by_player, price_history_health = _load_optional_player_supplemental_dataset(
+        name="player_price_history",
+        key="price_history",
+        feed_url=os.getenv(PLAYER_PRICE_HISTORY_FEED_URL_ENV),
+        snapshot_path=player_price_history_snapshot,
+    )
+    game_details_by_player, game_details_health = _load_optional_player_supplemental_dataset(
+        name="player_game_details",
+        key="game_details",
+        feed_url=os.getenv(PLAYER_GAME_DETAILS_FEED_URL_ENV),
+        snapshot_path=player_game_details_snapshot,
+    )
+
+    enriched_players: list[Player] = []
+    for player in players:
+        updates: dict[str, Any] = {}
+        if player.id in price_history_by_player:
+            updates["price_history"] = price_history_by_player[player.id]
+        if player.id in game_details_by_player:
+            updates["game_details"] = game_details_by_player[player.id]
+
+        if updates:
+            enriched_players.append(Player.model_validate(player.model_dump() | updates))
+        else:
+            enriched_players.append(player)
 
     return FeedBundle(
-        players=players,
+        players=enriched_players,
         fixtures=fixtures,
         news_signals=news,
         source_health={
             "players": players_health,
             "fixtures": fixtures_health,
             "news": news_health,
+            "player_price_history": price_history_health,
+            "player_game_details": game_details_health,
         },
         loaded_at=datetime.now(UTC).isoformat(),
     )

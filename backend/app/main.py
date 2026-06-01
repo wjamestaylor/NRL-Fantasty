@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 
 from .data import DATA_LOADED_AT, DATA_SOURCE_HEALTH, FIXTURES, NEWS_SIGNALS, PLAYERS
-from .engine import recommend_trades
+from .engine import project_player, recommend_trades
 from .models import (
     TradeRecommendationResponse,
     TradeSimulationRequest,
@@ -11,9 +11,57 @@ from .models import (
 app = FastAPI(title="Fantasy NRL Trade Lab API", version="0.1.0")
 
 
+def _rolling_average(values: list[float], window: int) -> float | None:
+    if len(values) < window:
+        return None
+    return round(sum(values[-window:]) / window, 2)
+
+
+def _player_analytics_payload(player_id: str) -> dict:
+    for player in PLAYERS:
+        if player.id != player_id:
+            continue
+
+        ordered_games = sorted(player.game_details, key=lambda game: game.round)
+        scores = [game.score for game in ordered_games]
+        minutes = [game.minutes for game in ordered_games]
+        base_projection = project_player(player)
+
+        return {
+            "id": player.id,
+            "name": player.name,
+            "team": player.team,
+            "positions": player.positions,
+            "price": player.price,
+            "price_history": [point.model_dump() for point in player.price_history],
+            "season_average": player.season_average,
+            "rolling_scores": {
+                "last_3": _rolling_average(scores, 3),
+                "last_5": _rolling_average(scores, 5),
+            },
+            "minutes": {
+                "recent": minutes[-5:],
+                "average": round(sum(minutes) / len(minutes), 2) if minutes else None,
+            },
+            "projections": {
+                "next_round": round(base_projection, 2),
+                "next_3_rounds": round(base_projection * 3, 2),
+                "next_6_rounds": round(base_projection * 6, 2),
+                "season_remaining": round(base_projection * 20, 2),
+            },
+        }
+
+    raise HTTPException(status_code=404, detail="Player not found")
+
+
 @app.get("/players")
 def get_players() -> list[dict]:
     return [player.model_dump() for player in PLAYERS]
+
+
+@app.get("/players/analytics")
+def get_player_analytics() -> list[dict]:
+    return [_player_analytics_payload(player.id) for player in PLAYERS]
 
 
 @app.get("/players/{player_id}")
@@ -22,6 +70,11 @@ def get_player(player_id: str) -> dict:
         if player.id == player_id:
             return player.model_dump()
     raise HTTPException(status_code=404, detail="Player not found")
+
+
+@app.get("/players/{player_id}/analytics")
+def get_player_analytics_by_id(player_id: str) -> dict:
+    return _player_analytics_payload(player_id)
 
 
 @app.get("/fixtures")
