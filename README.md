@@ -18,9 +18,9 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 - [x] Sample recommendation payloads and workflows
 
 ### Phase 2 — Real data integration
-- [ ] Replace placeholder/sample data with real player, fixture, and news feeds
-- [ ] Add player prices, averages, rolling scores, minutes, and projections
-- [ ] Add breakeven support when a reliable feed is available
+- [x] Replace placeholder/sample data with real player, fixture, and news feeds
+- [x] Add player prices, averages, rolling scores, minutes, and projections
+- [x] Add breakeven support when a reliable feed is available
 - [x] Persist historical player and fixture snapshots
 - [x] Add source health monitoring for data ingestion
 
@@ -224,8 +224,9 @@ Available MVP screens:
 - `/player-research`
 - `/planner`
 - `/news`
+- `/system-health` — data ingestion pipeline status and audit log
 
-Set `NRL_API_BASE_URL` in `frontend` to enable server-side feature checks (including conditional breakeven visibility on `/player-research`).
+Set `NEXT_PUBLIC_API_BASE_URL` in `frontend` to point at the backend (default: `http://localhost:8000`). This enables live analytics, conditional breakeven visibility on `/player-research`, and the system health dashboard.
 
 ## Tests
 
