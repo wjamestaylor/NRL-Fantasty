@@ -21,7 +21,7 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 - [ ] Replace placeholder/sample data with real player, fixture, and news feeds
 - [ ] Add player prices, averages, rolling scores, minutes, and projections
 - [ ] Add breakeven support when a reliable feed is available
-- [ ] Persist historical player and fixture snapshots
+- [x] Persist historical player and fixture snapshots
 - [x] Add source health monitoring for data ingestion
 
 ### Phase 3 — Team-aware recommendations
@@ -78,7 +78,55 @@ uvicorn app.main:app --reload
 - `POST /trade/simulate`
 - `GET /planner/bye`
 - `GET /health/data-sources`
+- `GET /history/snapshots`
+- `GET /history/snapshots/{dataset}/{date}`
 - `GET /health/ingestion-log`
+
+## Historical snapshot archiving
+
+Each time `refresh_snapshots_from_live_feeds()` runs, the validated payloads are also archived to:
+
+```
+backend/data/archive/<dataset>/<YYYY-MM-DD>.json.gz
+```
+
+One gzip-compressed file is written per dataset per calendar day (UTC).  A second refresh on the same day overwrites the earlier file, so the archive always reflects the latest intra-day state.
+
+### Supported datasets
+
+| Dataset | Archive path |
+|---------|-------------|
+| `players` | `data/archive/players/YYYY-MM-DD.json.gz` |
+| `fixtures` | `data/archive/fixtures/YYYY-MM-DD.json.gz` |
+| `news` | `data/archive/news/YYYY-MM-DD.json.gz` |
+
+### Custom archive location
+
+Set `NRL_ARCHIVE_DIR` to override the default archive root directory.
+
+### Querying historical archives
+
+```
+GET /history/snapshots                          -> list available dates per dataset
+GET /history/snapshots/{dataset}/{YYYY-MM-DD}   -> return archived payload for that date
+```
+
+### Retention and pruning
+
+Use `archive.prune_archive(data_dir, dataset, keep_days=90)` to remove entries older than a given number of days.  Recommended to run as a periodic maintenance task alongside the daily refresh.
+
+### GDPR — right to erasure
+
+To remove all historical records for a specific player across every players archive:
+
+```python
+from pathlib import Path
+from app.archive import purge_player_from_archives
+
+purge_player_from_archives(Path("backend/data"), player_id="<player-id>")
+```
+
+This rewrites affected archive files in-place without deleting other players' data.
 
 ## Data feeds and ingestion
 

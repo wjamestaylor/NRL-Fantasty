@@ -1,7 +1,10 @@
 from fastapi import FastAPI, HTTPException, Query
 
+from .archive import VALID_DATASETS as _VALID_DATASETS
+from .archive import list_archived_dates, load_archived_snapshot
 from .data import DATA_LOADED_AT, DATA_SOURCE_HEALTH, FIXTURES, NEWS_SIGNALS, PLAYERS
 from .engine import project_player, recommend_trades
+from .feed_ingestion import DEFAULT_DATA_DIR
 from .ingestion_log import read_ingestion_log
 from .models import (
     TradeRecommendationResponse,
@@ -161,6 +164,26 @@ def get_data_source_health() -> dict:
             }
         },
     }
+
+
+@app.get("/history/snapshots")
+def get_history_snapshots() -> dict:
+    """List available archived snapshot dates for all datasets."""
+    return {
+        dataset: list_archived_dates(DEFAULT_DATA_DIR, dataset)
+        for dataset in _VALID_DATASETS
+    }
+
+
+@app.get("/history/snapshots/{dataset}/{snapshot_date}")
+def get_history_snapshot(dataset: str, snapshot_date: str) -> list:
+    """Return the archived snapshot payload for *dataset* on *snapshot_date* (YYYY-MM-DD)."""
+    try:
+        return load_archived_snapshot(DEFAULT_DATA_DIR, dataset, snapshot_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/health/ingestion-log")
