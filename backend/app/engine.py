@@ -135,8 +135,8 @@ def recommend_trades(request: UserTeamImportRequest, top_n: int = 3) -> list[Tra
                     TradeRecommendation(
                         trade_count=trade_count,
                         trades=[
-                            TradePair(out_player_id=out.id, in_player_id=ins[i].id)
-                            for i, out in enumerate(outs)
+                            TradePair(out_player_id=out.id, in_player_id=ins[idx].id)
+                            for idx, out in enumerate(outs)
                         ],
                         projected_gain_next_3=round(gain_3, 2),
                         projected_gain_next_6=round(gain_6, 2),

@@ -408,7 +408,7 @@ export default function TradeLabPage() {
             </span>
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            🔒 Lock = keep in squad. ⚡ Sell = prioritise for trade-out.
+            🔒 Lock = keep in squad. ⚡ Sell = prioritize for trade-out.
           </p>
 
           {squad.length === 0 ? (
