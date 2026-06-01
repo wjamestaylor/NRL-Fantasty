@@ -187,6 +187,7 @@ uvicorn app.main:app --reload
 - `GET /players/{id}/analytics`
 - `GET /fixtures`
 - `GET /news/signals`
+- `GET /teams/game-stats`
 - `POST /user-team/import`
 - `POST /trade/recommend`
 - `POST /trade/simulate`
@@ -252,6 +253,8 @@ The backend now loads player, fixture, and news data from configurable live feed
 - `NRL_NEWS_FEED_URL` -> live news/alerts feed (JSON array of `NewsSignal` objects)
 - `NRL_PLAYER_PRICE_HISTORY_FEED_URL` -> optional live player price history feed
 - `NRL_PLAYER_GAME_DETAILS_FEED_URL` -> optional live player per-game detail feed
+- `NRL_PLAYER_STATS_WEBSITE_URL` -> optional website URL (HTML table) for player stats scraping
+- `NRL_TEAM_GAME_STATS_WEBSITE_URL` -> optional website URL (HTML table) for team game stats scraping
 
 If any live source is unavailable, the API automatically falls back to validated historical snapshots:
 
@@ -260,6 +263,7 @@ If any live source is unavailable, the API automatically falls back to validated
 - `backend/data/news_snapshot.json`
 - `backend/data/player_price_history_snapshot.json`
 - `backend/data/player_game_details_snapshot.json`
+- `backend/data/team_game_stats_snapshot.json`
 
 Breakeven support is automatically enabled only when every loaded player has `breakeven` populated. If coverage is incomplete, breakeven is disabled and omitted from player payloads to avoid partial/incorrect insight.
 
@@ -271,6 +275,15 @@ NRL_PLAYERS_FEED_URL="https://<players-feed>" \
 NRL_FIXTURES_FEED_URL="https://<fixtures-feed>" \
 NRL_NEWS_FEED_URL="https://<news-feed>" \
 python -m app.feed_ingestion
+```
+
+If JSON feeds are not available, you can ingest directly from scrapeable website tables (for example Rugby League Project-style player/team stats tables) by setting website URLs. The backend will parse table headers such as `Player/Team/Avg` for players and `Round/Team/Opponent/For/Against` for team game stats, then map rows into the project models:
+
+```bash
+cd backend
+NRL_PLAYER_STATS_WEBSITE_URL="https://<player-stats-page>" \
+NRL_TEAM_GAME_STATS_WEBSITE_URL="https://<team-game-stats-page>" \
+uvicorn app.main:app --reload
 ```
 
 Recommended production automation:

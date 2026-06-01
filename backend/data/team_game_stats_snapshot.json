@@ -1,0 +1,18 @@
+[
+  {
+    "round": 1,
+    "team": "Rabbitohs",
+    "opponent": "Roosters",
+    "points_for": 20,
+    "points_against": 18,
+    "result": "W"
+  },
+  {
+    "round": 1,
+    "team": "Roosters",
+    "opponent": "Rabbitohs",
+    "points_for": 18,
+    "points_against": 20,
+    "result": "L"
+  }
+]
