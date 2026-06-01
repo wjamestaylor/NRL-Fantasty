@@ -57,10 +57,6 @@ def _safe_dataset_segment(dataset: str) -> str:
     return segment
 
 
-def _validate_dataset(dataset: str) -> None:
-    _safe_dataset_segment(dataset)
-
-
 def _archive_dir(data_dir: Path) -> Path:
     raw = os.getenv(ARCHIVE_DIR_ENV)
     if raw:

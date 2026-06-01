@@ -201,3 +201,8 @@ def test_archive_snapshot_raises_for_unknown_dataset(tmp_path: Path) -> None:
 def test_load_archived_snapshot_raises_for_unknown_dataset(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Unknown dataset"):
         archive.load_archived_snapshot(tmp_path, "unknown", "2024-01-01")
+
+
+def test_list_archived_dates_raises_for_unknown_dataset(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Unknown dataset"):
+        archive.list_archived_dates(tmp_path, "unknown")
