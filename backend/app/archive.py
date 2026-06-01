@@ -29,13 +29,22 @@ from __future__ import annotations
 import gzip
 import json
 import os
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
 DEFAULT_ARCHIVE_SUBDIR = "archive"
 ARCHIVE_DIR_ENV = "NRL_ARCHIVE_DIR"
+
+# Datasets that are allowed as archive targets / query subjects.
+# Restricting to a fixed set prevents path-traversal via the dataset parameter.
+VALID_DATASETS: frozenset[str] = frozenset({"players", "fixtures", "news"})
+
+
+def _validate_dataset(dataset: str) -> None:
+    if dataset not in VALID_DATASETS:
+        raise ValueError(f"Unknown dataset {dataset!r}. Valid datasets: {sorted(VALID_DATASETS)}")
 
 
 def _archive_dir(data_dir: Path) -> Path:
@@ -75,6 +84,7 @@ def archive_snapshot(data_dir: Path, dataset: str, payload: Any, snapshot_date: 
 
     Returns the path of the written archive file.
     """
+    _validate_dataset(dataset)
     effective_date = snapshot_date or datetime.now(UTC).date()
     dest = _archive_path(data_dir, dataset, effective_date)
     _write_gz(dest, payload)
@@ -88,6 +98,7 @@ def _stem(path: Path) -> str:
 
 def list_archived_dates(data_dir: Path, dataset: str) -> list[str]:
     """Return a sorted list of ISO date strings for which an archive exists."""
+    _validate_dataset(dataset)
     dataset_dir = _dataset_dir(data_dir, dataset)
     if not dataset_dir.is_dir():
         return []
@@ -106,6 +117,7 @@ def load_archived_snapshot(data_dir: Path, dataset: str, snapshot_date: str) -> 
 
     Raises ``FileNotFoundError`` if no archive exists for that date.
     """
+    _validate_dataset(dataset)
     try:
         parsed_date = date.fromisoformat(snapshot_date)
     except ValueError as exc:
@@ -113,7 +125,7 @@ def load_archived_snapshot(data_dir: Path, dataset: str, snapshot_date: str) -> 
 
     path = _archive_path(data_dir, dataset, parsed_date)
     if not path.exists():
-        raise FileNotFoundError(f"No archive for dataset={dataset!r} date={snapshot_date!r}")
+        raise FileNotFoundError(f"No archive for dataset={dataset!r} date={parsed_date.isoformat()!r}")
     return _read_gz(path)
 
 
@@ -125,7 +137,8 @@ def prune_archive(data_dir: Path, dataset: str, keep_days: int) -> list[Path]:
     if keep_days < 1:
         raise ValueError("keep_days must be at least 1")
 
-    cutoff = datetime.now(UTC).date()
+    _validate_dataset(dataset)
+    cutoff = datetime.now(UTC).date() - timedelta(days=keep_days)
     dataset_dir = _dataset_dir(data_dir, dataset)
     if not dataset_dir.is_dir():
         return []
@@ -136,8 +149,7 @@ def prune_archive(data_dir: Path, dataset: str, keep_days: int) -> list[Path]:
             file_date = date.fromisoformat(_stem(path))
         except ValueError:
             continue
-        age = (cutoff - file_date).days
-        if age > keep_days:
+        if file_date < cutoff:
             path.unlink()
             removed.append(path)
     return removed

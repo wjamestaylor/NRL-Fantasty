@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 
+from .archive import VALID_DATASETS as _VALID_DATASETS
 from .archive import list_archived_dates, load_archived_snapshot
 from .data import DATA_LOADED_AT, DATA_SOURCE_HEALTH, FIXTURES, NEWS_SIGNALS, PLAYERS
 from .engine import project_player, recommend_trades
@@ -147,9 +148,6 @@ def get_data_source_health() -> dict:
     }
 
 
-_VALID_DATASETS = {"players", "fixtures", "news"}
-
-
 @app.get("/history/snapshots")
 def get_history_snapshots() -> dict:
     """List available archived snapshot dates for all datasets."""
@@ -162,8 +160,6 @@ def get_history_snapshots() -> dict:
 @app.get("/history/snapshots/{dataset}/{snapshot_date}")
 def get_history_snapshot(dataset: str, snapshot_date: str) -> list:
     """Return the archived snapshot payload for *dataset* on *snapshot_date* (YYYY-MM-DD)."""
-    if dataset not in _VALID_DATASETS:
-        raise HTTPException(status_code=404, detail=f"Unknown dataset {dataset!r}. Valid datasets: {sorted(_VALID_DATASETS)}")
     try:
         return load_archived_snapshot(DEFAULT_DATA_DIR, dataset, snapshot_date)
     except ValueError as exc:

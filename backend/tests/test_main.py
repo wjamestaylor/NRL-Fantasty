@@ -49,6 +49,6 @@ def test_history_snapshot_detail_returns_422_for_bad_date() -> None:
     assert response.status_code == 422
 
 
-def test_history_snapshot_detail_returns_404_for_unknown_dataset() -> None:
+def test_history_snapshot_detail_returns_422_for_unknown_dataset() -> None:
     response = client.get("/history/snapshots/unknown_dataset/2024-01-01")
-    assert response.status_code == 404
+    assert response.status_code == 422

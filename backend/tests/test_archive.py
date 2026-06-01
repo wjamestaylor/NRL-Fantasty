@@ -191,3 +191,13 @@ def test_purge_player_not_present_returns_empty(tmp_path: Path) -> None:
 
 def test_purge_player_no_op_when_no_archive_dir(tmp_path: Path) -> None:
     assert archive.purge_player_from_archives(tmp_path, "P1") == []
+
+
+def test_archive_snapshot_raises_for_unknown_dataset(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Unknown dataset"):
+        archive.archive_snapshot(tmp_path, "unknown", [], date(2024, 1, 1))
+
+
+def test_load_archived_snapshot_raises_for_unknown_dataset(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Unknown dataset"):
+        archive.load_archived_snapshot(tmp_path, "unknown", "2024-01-01")
