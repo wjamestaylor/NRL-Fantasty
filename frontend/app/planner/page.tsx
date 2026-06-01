@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type Strategy = "conservative" | "balanced" | "aggressive";
+import { ChartCard, ComparisonBarChart, LineChart } from "@/components/charts";
+import { SavedTeamsPanel } from "@/components/saved-teams-panel";
+import { getApiBaseUrl, parseApiError } from "@/lib/api";
+import type { SavedTeamPayload, Strategy } from "@/lib/team";
 
 type PlayerInfo = {
   id: string;
@@ -10,10 +13,7 @@ type PlayerInfo = {
   team: string;
   positions: string[];
   price: number;
-  projections: { next_3_rounds: number };
 };
-
-type SquadMember = PlayerInfo;
 
 type TradePair = {
   out_player_id: string;
@@ -69,14 +69,15 @@ function formatCash(amount: number): string {
   return `${amount >= 0 ? "+" : "-"}$${Math.abs(amount).toLocaleString()}`;
 }
 
-export default function PlannerPage() {
-  const baseUrl =
-    typeof window !== "undefined"
-      ? (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000")
-      : "http://localhost:8000";
+function clampTrades(value: number): 1 | 2 | 3 {
+  if (value <= 1) return 1;
+  if (value >= 3) return 3;
+  return 2;
+}
 
+export default function PlannerPage() {
   const [allPlayers, setAllPlayers] = useState<PlayerInfo[]>([]);
-  const [squad, setSquad] = useState<SquadMember[]>([]);
+  const [squad, setSquad] = useState<PlayerInfo[]>([]);
   const [search, setSearch] = useState("");
   const [bank, setBank] = useState(150000);
   const [tradesAvailable, setTradesAvailable] = useState<1 | 2 | 3>(2);
@@ -92,15 +93,18 @@ export default function PlannerPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`${baseUrl}/players/analytics`);
-        if (!res.ok) throw new Error("Failed to load players data.");
-        setAllPlayers((await res.json()) as PlayerInfo[]);
+        const response = await fetch(`${getApiBaseUrl()}/players/analytics`);
+        if (!response.ok) {
+          throw new Error("Failed to load players data.");
+        }
+        setAllPlayers((await response.json()) as PlayerInfo[]);
       } catch {
         setLoadError("Could not load players. Start backend to use planner.");
       }
     };
+
     void load();
-  }, [baseUrl]);
+  }, []);
 
   const playerIndex = useMemo(
     () => new Map(allPlayers.map((player) => [player.id, player])),
@@ -108,6 +112,7 @@ export default function PlannerPage() {
   );
 
   const squadIds = useMemo(() => new Set(squad.map((member) => member.id)), [squad]);
+
   const filteredPlayers = useMemo(
     () =>
       allPlayers.filter((player) => {
@@ -117,121 +122,179 @@ export default function PlannerPage() {
           !query ||
           player.name.toLowerCase().includes(query) ||
           player.team.toLowerCase().includes(query) ||
-          player.positions.some((position) =>
-            position.toLowerCase().includes(query),
-          )
+          player.positions.some((position) => position.toLowerCase().includes(query))
         );
       }),
     [allPlayers, search, squadIds],
   );
+
+  const savedTeamPayload = useMemo<SavedTeamPayload>(
+    () => ({
+      squad: squad.map((member) => member.id),
+      bank,
+      trades_available: tradesAvailable,
+      boosts_available: boostsAvailable,
+      strategy,
+      planning_horizon: horizon,
+      compare_all_scenarios: compareAll,
+    }),
+    [bank, boostsAvailable, compareAll, horizon, squad, strategy, tradesAvailable],
+  );
+
+  const activeScenario = useMemo(
+    () => plan?.scenarios.find((scenarioPlan) => scenarioPlan.scenario === strategy) ?? plan?.scenarios[0] ?? null,
+    [plan, strategy],
+  );
+
+  const byeCoverageTrend =
+    plan?.bye_coverage.map((round) => ({
+      label: `R${round.round}`,
+      value: round.coverage_ratio * 100,
+    })) ?? [];
+
+  const scenarioComparison =
+    plan?.scenarios.map((scenarioPlan) => ({
+      label: scenarioPlan.scenario,
+      value: scenarioPlan.total_projected_points_delta,
+    })) ?? [];
+
+  const bankTrend =
+    activeScenario?.rounds.map((round) => ({
+      label: `R${round.round}`,
+      value: round.bank_after,
+    })) ?? [];
+
+  function applySavedTeam(payload: SavedTeamPayload) {
+    setBank(payload.bank);
+    setTradesAvailable(clampTrades(payload.trades_available));
+    setBoostsAvailable(payload.boosts_available);
+    setStrategy(payload.strategy);
+    setHorizon((payload.planning_horizon as 1 | 2 | 3 | 4 | 5 | 6) ?? 3);
+    setCompareAll(payload.compare_all_scenarios ?? false);
+    setPlan(null);
+    setError(null);
+
+    const nextSquad = payload.squad
+      .map((playerId) => playerIndex.get(playerId))
+      .filter((player): player is PlayerInfo => Boolean(player));
+    setSquad(nextSquad);
+  }
 
   async function handleRunPlanner() {
     if (squad.length === 0) {
       setError("Add at least one player to your squad.");
       return;
     }
+
     setLoading(true);
     setError(null);
     setPlan(null);
+
     try {
-      const payload = {
-        squad: squad.map((member) => member.id),
-        bank,
-        trades_available: tradesAvailable,
-        boosts_available: boostsAvailable,
-        strategy,
-        planning_horizon: horizon,
-        compare_all_scenarios: compareAll,
-      };
-      const res = await fetch(`${baseUrl}/planner/plan`, {
+      const response = await fetch(`${getApiBaseUrl()}/planner/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(savedTeamPayload),
       });
-      if (!res.ok) throw new Error(`Planner request failed (${res.status})`);
-      setPlan((await res.json()) as PlannerResponse);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Planner request failed.");
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      setPlan((await response.json()) as PlannerResponse);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Planner request failed.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-6 py-10">
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-bold">Planner</h1>
-        <p className="mt-1 text-slate-600">
-          Build your squad context and simulate scenario-based planning across
-          upcoming rounds.
+    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Planner</h1>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base">
+          Build squad context, save scenarios, and compare multi-round planning with charts
+          for bye coverage, points, and cash flow.
         </p>
-      </div>
+      </section>
 
-      {loadError && (
-        <p className="rounded border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+      {loadError ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {loadError}
         </p>
-      )}
+      ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">Squad Builder</h2>
-          <input
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search players..."
-            className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
-          />
-          <ul className="mt-3 max-h-72 space-y-1 overflow-y-auto">
-            {filteredPlayers.map((player) => (
-              <li
-                key={player.id}
-                className="flex items-center justify-between rounded px-2 py-1 hover:bg-slate-50"
-              >
-                <span className="text-sm">
-                  {player.name} · {player.positions.join("/")} · $
-                  {player.price.toLocaleString()}
-                </span>
-                <button
-                  onClick={() => setSquad((prev) => [...prev, player])}
-                  className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700"
+      <section className="grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">Squad builder</h2>
+            <input
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by name, team, or position"
+              className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+            />
+            <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto">
+              {filteredPlayers.map((player) => (
+                <li
+                  key={player.id}
+                  className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"
                 >
-                  Add
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">{player.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {player.team} · {player.positions.join("/")} · ${player.price.toLocaleString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSquad((current) => [...current, player])}
+                    className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                  >
+                    Add
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">Selected squad ({squad.length})</h2>
+            <ul className="mt-3 max-h-80 space-y-2 overflow-y-auto">
+              {squad.length === 0 ? (
+                <li className="text-sm text-slate-400">Add players to start planning.</li>
+              ) : (
+                squad.map((member) => (
+                  <li
+                    key={member.id}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-slate-900">{member.name}</p>
+                      <p className="text-xs text-slate-500">${member.price.toLocaleString()}</p>
+                    </div>
+                    <button
+                      onClick={() =>
+                        setSquad((current) => current.filter((item) => item.id !== member.id))
+                      }
+                      className="rounded-lg px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-700"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">Selected Squad ({squad.length})</h2>
-          <ul className="mt-3 space-y-2">
-            {squad.map((member) => (
-              <li
-                key={member.id}
-                className="flex items-center justify-between rounded border border-slate-100 px-3 py-2 text-sm"
-              >
-                <span>
-                  {member.name} · ${member.price.toLocaleString()}
-                </span>
-                <button
-                  onClick={() =>
-                    setSquad((prev) => prev.filter((item) => item.id !== member.id))
-                  }
-                  className="text-slate-400 hover:text-red-600"
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+        <SavedTeamsPanel payload={savedTeamPayload} onLoad={applySavedTeam} />
+      </section>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold">Planner Settings</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <h2 className="text-lg font-semibold text-slate-900">Planner settings</h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <input
             type="number"
             min={0}
@@ -242,7 +305,7 @@ export default function PlannerPage() {
           />
           <select
             value={tradesAvailable}
-            onChange={(event) => setTradesAvailable(Number(event.target.value) as 1 | 2 | 3)}
+            onChange={(event) => setTradesAvailable(clampTrades(Number(event.target.value)))}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
           >
             {[1, 2, 3].map((value) => (
@@ -265,7 +328,7 @@ export default function PlannerPage() {
           <select
             value={strategy}
             onChange={(event) => setStrategy(event.target.value as Strategy)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm capitalize"
           >
             {STRATEGIES.map((value) => (
               <option key={value} value={value}>
@@ -275,9 +338,7 @@ export default function PlannerPage() {
           </select>
           <select
             value={horizon}
-            onChange={(event) =>
-              setHorizon(Number(event.target.value) as 1 | 2 | 3 | 4 | 5 | 6)
-            }
+            onChange={(event) => setHorizon(Number(event.target.value) as 1 | 2 | 3 | 4 | 5 | 6)}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
           >
             {[1, 2, 3, 4, 5, 6].map((value) => (
@@ -286,135 +347,118 @@ export default function PlannerPage() {
               </option>
             ))}
           </select>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600">
             <input
               type="checkbox"
               checked={compareAll}
               onChange={(event) => setCompareAll(event.target.checked)}
             />
-            Compare all
+            Compare all scenarios
           </label>
         </div>
-        <button
-          onClick={() => void handleRunPlanner()}
-          disabled={loading}
-          className="mt-4 rounded-lg bg-slate-800 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-        >
-          {loading ? "Planning…" : "Run Plan"}
-        </button>
-      </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => void handleRunPlanner()}
+            disabled={loading}
+            className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {loading ? "Planning…" : "Run plan"}
+          </button>
+          <p className="text-sm text-slate-500">Best on mobile: save a setup, then reload and compare scenarios.</p>
+        </div>
+      </section>
 
-      {error && (
-        <p className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+      {error ? (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           {error}
         </p>
-      )}
+      ) : null}
 
-      {plan && (
-        <div className="space-y-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold">Bye Coverage</h2>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-slate-500">
-                    <th className="py-1">Round</th>
-                    <th className="py-1">Available</th>
-                    <th className="py-1">On bye</th>
-                    <th className="py-1">Coverage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {plan.bye_coverage.map((round) => (
-                    <tr key={round.round} className="border-t border-slate-100">
-                      <td className="py-1">{round.round}</td>
-                      <td className="py-1">{round.available_count}</td>
-                      <td className="py-1">{round.bye_count}</td>
-                      <td className="py-1">{(round.coverage_ratio * 100).toFixed(0)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+      {plan ? (
+        <>
+          <section className="grid gap-4 xl:grid-cols-3">
+            <ChartCard title="Bye coverage trend" description="Coverage ratio across the planning horizon.">
+              <LineChart data={byeCoverageTrend} color="#0f766e" />
+            </ChartCard>
+            <ChartCard title="Scenario comparison" description="Projected points delta by strategy.">
+              <ComparisonBarChart data={scenarioComparison} />
+            </ChartCard>
+            <ChartCard
+              title="Bank path"
+              description={`Round-by-round bank under the ${activeScenario?.scenario ?? strategy} scenario.`}
+            >
+              <LineChart data={bankTrend} color="#7c3aed" />
+            </ChartCard>
+          </section>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-semibold">Cash & Price Outlook</h2>
-              <p className="mt-2 text-sm text-slate-600">
+          <section className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-900">Cash & price outlook</h2>
+              <p className="mt-3 text-sm text-slate-600">
                 Net price move: {formatCash(plan.cash_generation.projected_price_change)}
               </p>
               <p className="text-sm text-slate-600">
-                Cash generation:{" "}
-                {formatCash(plan.cash_generation.projected_cash_generation)}
+                Cash generation: {formatCash(plan.cash_generation.projected_cash_generation)}
               </p>
               <p className="text-sm text-slate-600">
-                Avg BE gap: {plan.cash_generation.avg_breakeven_gap.toFixed(2)}
+                Avg breakeven gap: {plan.cash_generation.avg_breakeven_gap.toFixed(2)}
               </p>
             </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-semibold">Structure & Flexibility</h2>
-              <p className="mt-2 text-sm text-slate-600">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-900">Structure & flexibility</h2>
+              <p className="mt-3 text-sm text-slate-600">
                 Dual-position players: {plan.squad_structure.dual_position_count}
               </p>
               <p className="text-sm text-slate-600">
-                Flexibility score:{" "}
-                {plan.squad_structure.position_flexibility_score.toFixed(2)}
+                Flexibility score: {plan.squad_structure.position_flexibility_score.toFixed(2)}
               </p>
               <p className="text-sm text-slate-600">
                 Balance score: {plan.squad_structure.squad_balance_score.toFixed(2)}
               </p>
             </div>
-          </div>
+          </section>
 
           {plan.scenarios.map((scenarioPlan) => (
-            <div
+            <section
               key={scenarioPlan.scenario}
-              className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
             >
-              <h2 className="text-lg font-semibold capitalize">
+              <h2 className="text-xl font-semibold capitalize text-slate-900">
                 {scenarioPlan.scenario} scenario
               </h2>
-              <p className="mt-1 text-sm text-slate-600">
+              <p className="mt-2 text-sm text-slate-600">
                 {scenarioPlan.total_projected_points_delta >= 0 ? "+" : ""}
-                {scenarioPlan.total_projected_points_delta.toFixed(1)} projected
-                points · {formatCash(scenarioPlan.total_projected_cash_delta)} cash
-                impact · risk {scenarioPlan.avg_risk_score.toFixed(2)}
+                {scenarioPlan.total_projected_points_delta.toFixed(1)} projected points · {" "}
+                {formatCash(scenarioPlan.total_projected_cash_delta)} cash impact · risk {" "}
+                {scenarioPlan.avg_risk_score.toFixed(2)}
               </p>
-              <div className="mt-3 space-y-2">
+              <div className="mt-4 grid gap-3">
                 {scenarioPlan.rounds.map((round) => (
-                  <div
-                    key={`${scenarioPlan.scenario}-${round.round}`}
-                    className="rounded border border-slate-100 bg-slate-50 p-3 text-sm"
-                  >
-                    <p className="font-medium">Round {round.round}</p>
-                    <p className="text-slate-600">
-                      Points: {round.projected_points_delta.toFixed(1)} · Cash:{" "}
-                      {formatCash(round.projected_cash_delta)} · Bank: $
-                      {round.bank_after.toLocaleString()}
-                    </p>
-                    {round.trades.length > 0 && (
-                      <ul className="mt-1 list-disc pl-4 text-slate-600">
+                  <div key={`${scenarioPlan.scenario}-${round.round}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="font-semibold text-slate-900">Round {round.round}</p>
+                      <p className="text-sm text-slate-600">
+                        Points {round.projected_points_delta.toFixed(1)} · Cash {formatCash(round.projected_cash_delta)} · Bank ${round.bank_after.toLocaleString()}
+                      </p>
+                    </div>
+                    {round.trades.length > 0 ? (
+                      <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
                         {round.trades.map((trade, index) => (
                           <li key={index}>
-                            OUT{" "}
-                            {playerIndex.get(trade.out_player_id)?.name ??
-                              trade.out_player_id}{" "}
-                            → IN{" "}
-                            {playerIndex.get(trade.in_player_id)?.name ??
-                              trade.in_player_id}
+                            OUT {playerIndex.get(trade.out_player_id)?.name ?? trade.out_player_id} → IN {playerIndex.get(trade.in_player_id)?.name ?? trade.in_player_id}
                           </li>
                         ))}
                       </ul>
+                    ) : (
+                      <p className="mt-3 text-sm text-slate-500">No trades required in this round.</p>
                     )}
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           ))}
-        </div>
-      )}
+        </>
+      ) : null}
     </main>
   );
 }

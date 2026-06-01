@@ -1,4 +1,7 @@
+import os
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from .archive import VALID_DATASETS as _VALID_DATASETS
 from .archive import list_archived_dates, load_archived_snapshot
@@ -21,6 +24,21 @@ from .models import (
 from .user_store import authenticate_user, create_user, get_user_for_token, list_saved_teams, save_team
 
 app = FastAPI(title="Fantasy NRL Trade Lab API", version="0.1.0")
+
+_default_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+_configured_origins = [
+    origin.strip()
+    for origin in os.getenv("FRONTEND_ORIGINS", ",".join(_default_origins)).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_configured_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _rolling_average(values: list[float], window: int) -> float | None:

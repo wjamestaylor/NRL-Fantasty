@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+import { ComparisonBarChart, ChartCard } from "@/components/charts";
+import { SavedTeamsPanel } from "@/components/saved-teams-panel";
+import { getApiBaseUrl, parseApiError } from "@/lib/api";
+import type { SavedTeamPayload, Strategy } from "@/lib/team";
 
 type PlayerInfo = {
   id: string;
@@ -40,8 +43,6 @@ type RecommendationsResponse = {
   recommendations: TradeRecommendation[];
 };
 
-type Strategy = "conservative" | "balanced" | "aggressive";
-
 const STRATEGY_OPTIONS: { value: Strategy; label: string }[] = [
   { value: "conservative", label: "Conservative" },
   { value: "balanced", label: "Balanced" },
@@ -49,30 +50,30 @@ const STRATEGY_OPTIONS: { value: Strategy; label: string }[] = [
 ];
 
 const TRADE_COUNT_LABELS: Record<number, string> = {
-  1: "Best 1-Trade Options",
-  2: "Best 2-Trade Options",
-  3: "Best 3-Trade Options",
+  1: "Best 1-trade options",
+  2: "Best 2-trade options",
+  3: "Best 3-trade options",
 };
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatCash(amount: number): string {
   return `${amount >= 0 ? "+" : "-"}$${Math.abs(amount).toLocaleString()}`;
 }
 
-function groupByTradeCount(
-  recs: TradeRecommendation[],
-): Map<number, TradeRecommendation[]> {
-  const map = new Map<number, TradeRecommendation[]>();
-  for (const rec of recs) {
-    const group = map.get(rec.trade_count) ?? [];
-    group.push(rec);
-    map.set(rec.trade_count, group);
+function groupByTradeCount(recommendations: TradeRecommendation[]) {
+  const grouped = new Map<number, TradeRecommendation[]>();
+  for (const recommendation of recommendations) {
+    const current = grouped.get(recommendation.trade_count) ?? [];
+    current.push(recommendation);
+    grouped.set(recommendation.trade_count, current);
   }
-  return map;
+  return grouped;
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+function clampTrades(value: number): 1 | 2 | 3 {
+  if (value <= 1) return 1;
+  if (value >= 3) return 3;
+  return 2;
+}
 
 function ToggleButton({
   active,
@@ -87,8 +88,9 @@ function ToggleButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={`rounded px-2 py-0.5 text-xs font-semibold transition ${
+      className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
         active ? color : "bg-slate-100 text-slate-500 hover:bg-slate-200"
       }`}
     >
@@ -98,506 +100,439 @@ function ToggleButton({
 }
 
 function RecommendationCard({
-  rec,
+  recommendation,
   playerIndex,
 }: {
-  rec: TradeRecommendation;
+  recommendation: TradeRecommendation;
   playerIndex: Map<string, PlayerInfo>;
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-      <div className="flex flex-wrap gap-4 text-sm">
-        <div>
-          <span className="font-medium text-slate-700">Score: </span>
-          <span className="font-bold">{rec.total_trade_score.toFixed(2)}</span>
-        </div>
-        <div>
-          <span className="font-medium text-slate-700">Pts +3R: </span>
-          <span
-            className={
-              rec.projected_gain_next_3 >= 0
-                ? "text-green-700 font-semibold"
-                : "text-red-700 font-semibold"
-            }
-          >
-            {rec.projected_gain_next_3 >= 0 ? "+" : ""}
-            {rec.projected_gain_next_3.toFixed(1)}
-          </span>
-        </div>
-        <div>
-          <span className="font-medium text-slate-700">Pts +6R: </span>
-          <span
-            className={
-              rec.projected_gain_next_6 >= 0
-                ? "text-green-700 font-semibold"
-                : "text-red-700 font-semibold"
-            }
-          >
-            {rec.projected_gain_next_6 >= 0 ? "+" : ""}
-            {rec.projected_gain_next_6.toFixed(1)}
-          </span>
-        </div>
-        <div>
-          <span className="font-medium text-slate-700">Cash: </span>
-          <span
-            className={
-              rec.cash_impact >= 0
-                ? "text-green-700 font-semibold"
-                : "text-red-700 font-semibold"
-            }
-          >
-            {formatCash(rec.cash_impact)}
-          </span>
-        </div>
-        <div>
-          <span className="font-medium text-slate-700">Risk: </span>
-          <span>{rec.risk_score.toFixed(2)}</span>
-        </div>
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-wrap gap-3 text-sm text-slate-600">
+        <span className="font-semibold text-slate-900">
+          Score {recommendation.total_trade_score.toFixed(2)}
+        </span>
+        <span>+3R {recommendation.projected_gain_next_3.toFixed(1)}</span>
+        <span>+6R {recommendation.projected_gain_next_6.toFixed(1)}</span>
+        <span>Cash {formatCash(recommendation.cash_impact)}</span>
+        <span>Risk {recommendation.risk_score.toFixed(2)}</span>
       </div>
 
-      <div className="mt-3 space-y-1">
-        {rec.trades.map((t, i) => {
-          const outPlayer = playerIndex.get(t.out_player_id);
-          const inPlayer = playerIndex.get(t.in_player_id);
+      <div className="mt-3 space-y-2 text-sm">
+        {recommendation.trades.map((trade, index) => {
+          const outPlayer = playerIndex.get(trade.out_player_id);
+          const inPlayer = playerIndex.get(trade.in_player_id);
           return (
-            <div key={i} className="flex items-center gap-2 text-sm">
-              <span className="rounded bg-red-100 px-2 py-0.5 text-red-800 font-medium">
-                OUT: {outPlayer?.name ?? t.out_player_id}
-                {outPlayer ? ` ($${outPlayer.price.toLocaleString()})` : ""}
+            <div key={index} className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-rose-100 px-3 py-1 font-medium text-rose-800">
+                OUT {outPlayer?.name ?? trade.out_player_id}
               </span>
               <span className="text-slate-400">→</span>
-              <span className="rounded bg-green-100 px-2 py-0.5 text-green-800 font-medium">
-                IN: {inPlayer?.name ?? t.in_player_id}
-                {inPlayer ? ` ($${inPlayer.price.toLocaleString()})` : ""}
+              <span className="rounded-full bg-emerald-100 px-3 py-1 font-medium text-emerald-800">
+                IN {inPlayer?.name ?? trade.in_player_id}
               </span>
             </div>
           );
         })}
       </div>
 
-      <p className="mt-3 text-xs text-slate-500 italic">{rec.explanation}</p>
+      <p className="mt-3 text-sm leading-6 text-slate-600">{recommendation.explanation}</p>
     </div>
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
 export default function TradeLabPage() {
-  const baseUrl =
-    typeof window !== "undefined"
-      ? (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000")
-      : "http://localhost:8000";
-
-  // All available players for the picker
   const [allPlayers, setAllPlayers] = useState<PlayerInfo[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  // Squad builder state
   const [squad, setSquad] = useState<SquadMember[]>([]);
   const [pickerSearch, setPickerSearch] = useState("");
-
-  // Team context
   const [bank, setBank] = useState(150000);
   const [tradesAvailable, setTradesAvailable] = useState<1 | 2 | 3>(2);
   const [boostsAvailable, setBoostsAvailable] = useState(1);
   const [strategy, setStrategy] = useState<Strategy>("balanced");
-
-  // Recommendations
-  const [recommendations, setRecommendations] = useState<
-    TradeRecommendation[] | null
-  >(null);
+  const [recommendations, setRecommendations] = useState<TradeRecommendation[] | null>(null);
   const [recError, setRecError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Load players on mount
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`${baseUrl}/players/analytics`);
-        if (!res.ok) throw new Error("Failed to load players");
-        const data = (await res.json()) as PlayerInfo[];
-        setAllPlayers(data);
+        const response = await fetch(`${getApiBaseUrl()}/players/analytics`);
+        if (!response.ok) {
+          throw new Error("Failed to load players");
+        }
+        setAllPlayers((await response.json()) as PlayerInfo[]);
       } catch {
-        setLoadError(
-          "Could not load player list. Start the backend to enable the squad builder.",
-        );
+        setLoadError("Could not load player list. Start the backend to enable the squad builder.");
       }
     };
+
     void load();
-  }, [baseUrl]);
+  }, []);
 
-  // Derived: player index for recommendation display
-  const playerIndex = new Map<string, PlayerInfo>(
-    allPlayers.map((p) => [p.id, p]),
+  const playerIndex = useMemo(() => {
+    const index = new Map(allPlayers.map((player) => [player.id, player]));
+    squad.forEach((member) => index.set(member.id, member));
+    return index;
+  }, [allPlayers, squad]);
+
+  const squadIds = useMemo(() => new Set(squad.map((member) => member.id)), [squad]);
+
+  const filteredPlayers = useMemo(
+    () =>
+      allPlayers.filter((player) => {
+        if (squadIds.has(player.id)) return false;
+        const query = pickerSearch.toLowerCase();
+        return (
+          !query ||
+          player.name.toLowerCase().includes(query) ||
+          player.team.toLowerCase().includes(query) ||
+          player.positions.some((position) => position.toLowerCase().includes(query))
+        );
+      }),
+    [allPlayers, pickerSearch, squadIds],
   );
-  squad.forEach((m) => playerIndex.set(m.id, m));
 
-  // Squad builder helpers
-  const squadIds = new Set(squad.map((m) => m.id));
+  const savedTeamPayload = useMemo<SavedTeamPayload>(
+    () => ({
+      squad: squad.map((member) => member.id),
+      bank,
+      trades_available: tradesAvailable,
+      boosts_available: boostsAvailable,
+      strategy,
+      locked_players: squad.filter((member) => member.locked).map((member) => member.id),
+      must_sell: squad.filter((member) => member.mustSell).map((member) => member.id),
+    }),
+    [bank, boostsAvailable, squad, strategy, tradesAvailable],
+  );
 
-  const filteredPlayers = allPlayers.filter((p) => {
-    if (squadIds.has(p.id)) return false;
-    const q = pickerSearch.toLowerCase();
-    return (
-      !q ||
-      p.name.toLowerCase().includes(q) ||
-      p.team.toLowerCase().includes(q) ||
-      p.positions.some((pos) => pos.toLowerCase().includes(q))
-    );
-  });
+  const groupedRecommendations = recommendations ? groupByTradeCount(recommendations) : null;
+
+  const tradeComparison = recommendations
+    ? Array.from(groupByTradeCount(recommendations).entries()).map(([tradeCount, group]) => ({
+        label: `${tradeCount} trade${tradeCount > 1 ? "s" : ""}`,
+        value: group[0]?.projected_gain_next_3 ?? 0,
+      }))
+    : [];
 
   function addToSquad(player: PlayerInfo) {
-    setSquad((prev) => [
-      ...prev,
-      { ...player, locked: false, mustSell: false },
-    ]);
+    setSquad((current) => [...current, { ...player, locked: false, mustSell: false }]);
   }
 
-  function removeFromSquad(id: string) {
-    setSquad((prev) => prev.filter((m) => m.id !== id));
+  function removeFromSquad(playerId: string) {
+    setSquad((current) => current.filter((member) => member.id !== playerId));
   }
 
-  function toggleLock(id: string) {
-    setSquad((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? { ...m, locked: !m.locked, mustSell: m.locked ? m.mustSell : false }
-          : m,
+  function toggleLock(playerId: string) {
+    setSquad((current) =>
+      current.map((member) =>
+        member.id === playerId
+          ? { ...member, locked: !member.locked, mustSell: member.locked ? member.mustSell : false }
+          : member,
       ),
     );
   }
 
-  function toggleMustSell(id: string) {
-    setSquad((prev) =>
-      prev.map((m) =>
-        m.id === id
+  function toggleMustSell(playerId: string) {
+    setSquad((current) =>
+      current.map((member) =>
+        member.id === playerId
           ? {
-              ...m,
-              mustSell: !m.mustSell,
-              locked: m.mustSell ? m.locked : false,
+              ...member,
+              mustSell: !member.mustSell,
+              locked: member.mustSell ? member.locked : false,
             }
-          : m,
+          : member,
       ),
     );
   }
 
-  // Submit to backend
+  function applySavedTeam(payload: SavedTeamPayload) {
+    setBank(payload.bank);
+    setTradesAvailable(clampTrades(payload.trades_available));
+    setBoostsAvailable(payload.boosts_available);
+    setStrategy(payload.strategy);
+    setRecommendations(null);
+    setRecError(null);
+
+    const locked = new Set(payload.locked_players ?? []);
+    const mustSell = new Set(payload.must_sell ?? []);
+    const nextSquad = payload.squad
+      .map((playerId) => playerIndex.get(playerId))
+      .filter((player): player is PlayerInfo => Boolean(player))
+      .map((player) => ({
+        ...player,
+        locked: locked.has(player.id),
+        mustSell: mustSell.has(player.id),
+      }));
+    setSquad(nextSquad);
+  }
+
   async function handleGetRecommendations() {
     if (squad.length === 0) {
       setRecError("Add at least one player to your squad before running recommendations.");
       return;
     }
+
     setLoading(true);
     setRecError(null);
     setRecommendations(null);
 
     try {
-      const payload = {
-        squad: squad.map((m) => m.id),
-        bank,
-        trades_available: tradesAvailable,
-        boosts_available: boostsAvailable,
-        strategy,
-        locked_players: squad.filter((m) => m.locked).map((m) => m.id),
-        must_sell: squad.filter((m) => m.mustSell).map((m) => m.id),
-      };
-
-      const res = await fetch(`${baseUrl}/trade/recommend`, {
+      const response = await fetch(`${getApiBaseUrl()}/trade/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(savedTeamPayload),
       });
 
-      if (!res.ok) {
-        const detail = (await res.json().catch(() => ({}))) as {
-          detail?: string;
-        };
-        throw new Error(detail.detail ?? `Request failed (${res.status})`);
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
       }
 
-      const data = (await res.json()) as RecommendationsResponse;
-      setRecommendations(data.recommendations);
-    } catch (err) {
-      setRecError(
-        err instanceof Error ? err.message : "Failed to fetch recommendations.",
-      );
+      const payload = (await response.json()) as RecommendationsResponse;
+      setRecommendations(payload.recommendations);
+    } catch (error) {
+      setRecError(error instanceof Error ? error.message : "Failed to fetch recommendations.");
     } finally {
       setLoading(false);
     }
   }
 
-  const groupedRecs = recommendations
-    ? groupByTradeCount(recommendations)
-    : null;
-
-  // ── Render ──────────────────────────────────────────────────────────────────
-
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-6 py-10">
-      {/* Header */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-bold">Trade Lab</h1>
-        <p className="mt-1 text-slate-600">
-          Build your squad, set your budget, and get team-aware 1-, 2-, and
-          3-trade recommendations.
+    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Trade Lab</h1>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base">
+          Build your squad, save setups to your account, and compare the best one-, two-,
+          and three-trade options with mobile-friendly controls.
         </p>
-      </div>
+      </section>
 
-      {loadError && (
-        <p className="rounded border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+      {loadError ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {loadError}
         </p>
-      )}
+      ) : null}
 
-      {/* Squad Builder + Roster — side by side on wider screens */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Player Picker */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">Squad Builder</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Search and add players to your squad.
-          </p>
-
-          <input
-            type="text"
-            placeholder="Search by name, team, or position…"
-            value={pickerSearch}
-            onChange={(e) => setPickerSearch(e.target.value)}
-            className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
-          />
-
-          <ul className="mt-3 max-h-72 space-y-1 overflow-y-auto">
-            {filteredPlayers.length === 0 && (
-              <li className="text-xs text-slate-400 italic">
-                {allPlayers.length === 0
-                  ? "Loading players…"
-                  : "No players match your search."}
-              </li>
-            )}
-            {filteredPlayers.map((player) => (
-              <li
-                key={player.id}
-                className="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"
-              >
-                <div className="min-w-0 flex-1">
-                  <span className="truncate font-medium text-sm">
-                    {player.name}
-                  </span>
-                  <span className="ml-2 text-xs text-slate-500">
-                    {player.team} · {player.positions.join("/")} ·{" "}
-                    ${player.price.toLocaleString()}
-                  </span>
-                </div>
-                <button
-                  onClick={() => addToSquad(player)}
-                  className="ml-2 shrink-0 rounded bg-slate-800 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700"
-                >
-                  Add
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Current Roster */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">
-            Your Squad{" "}
-            <span className="text-sm font-normal text-slate-500">
-              ({squad.length} player{squad.length !== 1 ? "s" : ""})
-            </span>
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            🔒 Lock = keep in squad. ⚡ Sell = prioritize for trade-out.
-          </p>
-
-          {squad.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-400 italic">
-              No players added yet. Use the Squad Builder to add players.
-            </p>
-          ) : (
-            <ul className="mt-3 space-y-2">
-              {squad.map((member) => (
-                <li
-                  key={member.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2"
-                >
-                  <div className="min-w-0 flex-1">
-                    <span className="truncate font-medium text-sm">
-                      {member.name}
-                    </span>
-                    <span className="ml-2 text-xs text-slate-500">
-                      {member.positions.join("/")} · $
-                      {member.price.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <ToggleButton
-                      active={member.locked}
-                      label="🔒 Lock"
-                      color="bg-blue-100 text-blue-800"
-                      onClick={() => toggleLock(member.id)}
-                    />
-                    <ToggleButton
-                      active={member.mustSell}
-                      label="⚡ Sell"
-                      color="bg-orange-100 text-orange-800"
-                      onClick={() => toggleMustSell(member.id)}
-                    />
+      <section className="grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">Squad builder</h2>
+            <p className="mt-1 text-xs text-slate-500">Search and add players to your current squad.</p>
+            <input
+              type="text"
+              placeholder="Search by name, team, or position"
+              value={pickerSearch}
+              onChange={(event) => setPickerSearch(event.target.value)}
+              className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+            />
+            <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto">
+              {filteredPlayers.length === 0 ? (
+                <li className="text-sm text-slate-400">No players match your search.</li>
+              ) : (
+                filteredPlayers.map((player) => (
+                  <li
+                    key={player.id}
+                    className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-slate-900">{player.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {player.team} · {player.positions.join("/")} · ${player.price.toLocaleString()}
+                      </p>
+                    </div>
                     <button
-                      onClick={() => removeFromSquad(member.id)}
-                      className="rounded px-2 py-0.5 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      onClick={() => addToSquad(player)}
+                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
                     >
-                      ✕
+                      Add
                     </button>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                ))
+              )}
             </ul>
-          )}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">Your squad ({squad.length})</h2>
+            <p className="mt-1 text-xs text-slate-500">Lock players you must keep or flag must-sell exits.</p>
+            <ul className="mt-3 max-h-80 space-y-2 overflow-y-auto">
+              {squad.length === 0 ? (
+                <li className="text-sm text-slate-400">No players added yet.</li>
+              ) : (
+                squad.map((member) => (
+                  <li
+                    key={member.id}
+                    className="rounded-xl border border-slate-200 px-3 py-3"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{member.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {member.positions.join("/")} · ${member.price.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <ToggleButton
+                          active={member.locked}
+                          label="Lock"
+                          color="bg-blue-100 text-blue-800"
+                          onClick={() => toggleLock(member.id)}
+                        />
+                        <ToggleButton
+                          active={member.mustSell}
+                          label="Must sell"
+                          color="bg-orange-100 text-orange-800"
+                          onClick={() => toggleMustSell(member.id)}
+                        />
+                        <button
+                          onClick={() => removeFromSquad(member.id)}
+                          className="rounded-full px-2.5 py-1 text-xs font-medium text-slate-500 hover:bg-rose-50 hover:text-rose-700"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
         </div>
-      </div>
 
-      {/* Team Settings */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold">Team Settings</h2>
+        <SavedTeamsPanel payload={savedTeamPayload} onLoad={applySavedTeam} />
+      </section>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Bank */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <h2 className="text-lg font-semibold text-slate-900">Team settings</h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Bank ($)
+            <label className="mb-1 block text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
+              Bank
             </label>
             <input
               type="number"
               min={0}
               step={1000}
               value={bank}
-              onChange={(e) => setBank(Math.max(0, Number(e.target.value)))}
+              onChange={(event) => setBank(Math.max(0, Number(event.target.value)))}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
             />
           </div>
-
-          {/* Trades Available */}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Trades Available
+            <label className="mb-1 block text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
+              Trades
             </label>
             <div className="flex gap-2">
-              {([1, 2, 3] as const).map((n) => (
+              {[1, 2, 3].map((value) => (
                 <button
-                  key={n}
-                  onClick={() => setTradesAvailable(n)}
-                  className={`flex-1 rounded-lg border py-2 text-sm font-medium transition ${
-                    tradesAvailable === n
-                      ? "border-slate-800 bg-slate-800 text-white"
+                  key={value}
+                  onClick={() => setTradesAvailable(value as 1 | 2 | 3)}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold ${
+                    tradesAvailable === value
+                      ? "border-slate-900 bg-slate-900 text-white"
                       : "border-slate-300 text-slate-700 hover:bg-slate-50"
                   }`}
                 >
-                  {n}
+                  {value}
                 </button>
               ))}
             </div>
           </div>
-
-          {/* Boosts */}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Boosts Remaining
+            <label className="mb-1 block text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
+              Boosts
             </label>
             <input
               type="number"
               min={0}
               max={9}
               value={boostsAvailable}
-              onChange={(e) =>
-                setBoostsAvailable(
-                  Math.max(0, Math.min(9, Number(e.target.value))),
-                )
+              onChange={(event) =>
+                setBoostsAvailable(Math.max(0, Math.min(9, Number(event.target.value))))
               }
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
             />
           </div>
-
-          {/* Strategy */}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
               Strategy
             </label>
             <select
               value={strategy}
-              onChange={(e) => setStrategy(e.target.value as Strategy)}
+              onChange={(event) => setStrategy(event.target.value as Strategy)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
             >
-              {STRATEGY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
+              {STRATEGY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
           </div>
         </div>
-      </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => void handleGetRecommendations()}
+            disabled={loading}
+            className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {loading ? "Calculating…" : "Get recommendations"}
+          </button>
+          <p className="text-sm text-slate-500">Saved teams make it easy to revisit trade scenarios on mobile.</p>
+        </div>
+      </section>
 
-      {/* CTA */}
-      <div className="flex items-center gap-4">
-        <button
-          onClick={() => void handleGetRecommendations()}
-          disabled={loading}
-          className="rounded-lg bg-slate-800 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50 transition"
-        >
-          {loading ? "Calculating…" : "Get Recommendations"}
-        </button>
-        {squad.length === 0 && (
-          <span className="text-sm text-slate-400">
-            Add players to your squad first.
-          </span>
-        )}
-      </div>
-
-      {recError && (
-        <p className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+      {recError ? (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           {recError}
         </p>
-      )}
+      ) : null}
 
-      {/* Results */}
-      {groupedRecs && (
-        <div className="space-y-6">
-          {groupedRecs.size === 0 && (
-            <p className="text-sm text-slate-500">
-              No valid trade recommendations found for the current squad and
-              budget. Try increasing your bank or adjusting locked/must-sell
-              settings.
-            </p>
-          )}
+      {recommendations ? (
+        <>
+          <ChartCard
+            title="Top recommendation comparison"
+            description="Best +3 round projection in each trade-count group."
+          >
+            <ComparisonBarChart data={tradeComparison} />
+          </ChartCard>
 
-          {Array.from(groupedRecs.entries()).map(([tradeCount, recs]) => (
-            <div
-              key={tradeCount}
-              className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
-            >
-              <h2 className="text-lg font-semibold">
-                {TRADE_COUNT_LABELS[tradeCount] ?? `${tradeCount}-Trade Options`}
-              </h2>
-              <p className="mt-1 text-xs text-slate-500">
-                Top {recs.length} recommendation
-                {recs.length !== 1 ? "s" : ""} — sorted by trade score.
+          <section className="space-y-6">
+            {groupedRecommendations && groupedRecommendations.size === 0 ? (
+              <p className="text-sm text-slate-500">
+                No valid trade recommendations found. Try increasing your bank or adjusting
+                locked and must-sell settings.
               </p>
+            ) : null}
 
-              <div className="mt-4 space-y-3">
-                {recs.map((rec, i) => (
-                  <RecommendationCard
-                    key={i}
-                    rec={rec}
-                    playerIndex={playerIndex}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+            {groupedRecommendations
+              ? Array.from(groupedRecommendations.entries()).map(([tradeCount, group]) => (
+                  <div
+                    key={tradeCount}
+                    className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+                  >
+                    <h2 className="text-xl font-semibold text-slate-900">
+                      {TRADE_COUNT_LABELS[tradeCount] ?? `${tradeCount}-trade options`}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Top {group.length} recommendation{group.length === 1 ? "" : "s"} sorted by trade score.
+                    </p>
+                    <div className="mt-4 space-y-3">
+                      {group.map((recommendation, index) => (
+                        <RecommendationCard
+                          key={`${tradeCount}-${index}`}
+                          recommendation={recommendation}
+                          playerIndex={playerIndex}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))
+              : null}
+          </section>
+        </>
+      ) : null}
     </main>
   );
 }
