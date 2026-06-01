@@ -96,7 +96,7 @@ export default function PlayerResearchPage() {
             </table>
           </div>
         )}
-        {!error && !breakevenAvailable ? (
+        {!error && players.length > 0 && !breakevenAvailable ? (
           <p className="mt-4 text-sm text-slate-500">
             Breakeven data will appear when available for all players.
           </p>
