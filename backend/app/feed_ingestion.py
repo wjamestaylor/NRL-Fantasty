@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from .archive import archive_snapshot
 from .models import Fixture, NewsSignal, Player
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
@@ -263,18 +264,27 @@ def refresh_snapshots_from_live_feeds() -> FeedBundle:
     validated_fixtures = _validate_payload(fixtures_payload, Fixture)
     validated_news = _validate_payload(news_payload, NewsSignal)
 
+    players_snapshot_path = _snapshot_path(PLAYERS_SNAPSHOT_PATH_ENV, DEFAULT_PLAYERS_SNAPSHOT_PATH)
+    fixtures_snapshot_path = _snapshot_path(FIXTURES_SNAPSHOT_PATH_ENV, DEFAULT_FIXTURES_SNAPSHOT_PATH)
+    news_snapshot_path = _snapshot_path(NEWS_SNAPSHOT_PATH_ENV, DEFAULT_NEWS_SNAPSHOT_PATH)
+
     _write_json_file(
-        _snapshot_path(PLAYERS_SNAPSHOT_PATH_ENV, DEFAULT_PLAYERS_SNAPSHOT_PATH),
+        players_snapshot_path,
         [player.model_dump() for player in validated_players],
     )
     _write_json_file(
-        _snapshot_path(FIXTURES_SNAPSHOT_PATH_ENV, DEFAULT_FIXTURES_SNAPSHOT_PATH),
+        fixtures_snapshot_path,
         [fixture.model_dump() for fixture in validated_fixtures],
     )
     _write_json_file(
-        _snapshot_path(NEWS_SNAPSHOT_PATH_ENV, DEFAULT_NEWS_SNAPSHOT_PATH),
+        news_snapshot_path,
         [signal.model_dump() for signal in validated_news],
     )
+
+    data_dir = players_snapshot_path.parent
+    archive_snapshot(data_dir, "players", [player.model_dump() for player in validated_players])
+    archive_snapshot(data_dir, "fixtures", [fixture.model_dump() for fixture in validated_fixtures])
+    archive_snapshot(data_dir, "news", [signal.model_dump() for signal in validated_news])
 
     return load_feed_bundle()
 
