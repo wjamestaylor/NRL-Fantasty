@@ -31,7 +31,8 @@ type AuthPayload = {
   user: AuthUser;
 };
 
-const AUTH_STORAGE_KEY = "nrl-fantasty-auth";
+const AUTH_STORAGE_KEY = "nrl-fantasy-auth";
+const LEGACY_AUTH_STORAGE_KEY = "nrl-fantasty-auth";
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -46,6 +47,7 @@ function persistAuth(payload: AuthPayload | null) {
   }
 
   window.localStorage.removeItem(AUTH_STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -65,7 +67,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const restore = async () => {
-      const stored = window.localStorage.getItem(AUTH_STORAGE_KEY);
+      const stored =
+        window.localStorage.getItem(AUTH_STORAGE_KEY) ??
+        window.localStorage.getItem(LEGACY_AUTH_STORAGE_KEY);
       if (!stored) {
         setIsReady(true);
         return;
