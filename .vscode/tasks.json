@@ -1,0 +1,142 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend: Create virtual environment",
+      "type": "shell",
+      "command": "python3 -m venv .venv",
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: Install dependencies",
+      "type": "shell",
+      "command": "${workspaceFolder}/backend/.venv/bin/python -m pip install -r requirements.txt",
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "dependsOn": "Backend: Create virtual environment",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Install dependencies",
+      "type": "shell",
+      "command": "npm install",
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Bootstrap (install all dependencies)",
+      "type": "shell",
+      "command": "echo Bootstrap complete",
+      "dependsOn": [
+        "Backend: Install dependencies",
+        "Frontend: Install dependencies"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: Run API (uvicorn)",
+      "type": "shell",
+      "command": "${workspaceFolder}/backend/.venv/bin/python -m uvicorn app.main:app --reload --port 8000",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "problemMatcher": {
+        "owner": "python",
+        "pattern": [
+          {
+            "regexp": "^(__never_match__):(.*)$",
+            "file": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*(Uvicorn running on|Application startup complete).*"
+        }
+      },
+      "presentation": {
+        "group": "app",
+        "panel": "shared",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Frontend: Run dev server",
+      "type": "shell",
+      "command": "npm run dev -- -p 3100",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "problemMatcher": {
+        "owner": "nextjs",
+        "pattern": [
+          {
+            "regexp": "^(__never_match__):(.*)$",
+            "file": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*(Ready in|ready - started server on|Local:\\s+http://localhost:3100).*"
+        }
+      },
+      "presentation": {
+        "group": "app",
+        "panel": "shared",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "App: Start (frontend + backend)",
+      "dependsOn": [
+        "Backend: Run API (uvicorn)",
+        "Frontend: Run dev server"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Build",
+      "type": "shell",
+      "command": "npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: Run tests",
+      "type": "shell",
+      "command": "${workspaceFolder}/backend/.venv/bin/python -m pytest",
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Build/check",
+      "dependsOn": [
+        "Frontend: Build",
+        "Backend: Run tests"
+      ],
+      "dependsOrder": "parallel",
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}
