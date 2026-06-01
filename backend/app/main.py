@@ -75,8 +75,8 @@ def get_bye_planner() -> dict:
 
 @app.get("/health/data-sources")
 def get_data_source_health() -> dict:
-    source_states = [source["status"] for source in DATA_SOURCE_HEALTH.values()]
-    status = "degraded" if any(state == "snapshot_fallback" for state in source_states) else "ok"
+    source_statuses = [source["status"] for source in DATA_SOURCE_HEALTH.values()]
+    status = "degraded" if any(state == "snapshot_fallback" for state in source_statuses) else "ok"
     return {
         "status": status,
         "loaded_at": DATA_LOADED_AT,

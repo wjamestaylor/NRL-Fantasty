@@ -45,16 +45,14 @@ def _snapshot_path(env_name: str, fallback: Path) -> Path:
 def _fetch_json(url: str, retries: int = 3) -> Any:
     timeout = httpx.Timeout(10.0, connect=5.0)
     last_error: Exception | None = None
-    for _ in range(retries):
-        try:
-            with httpx.Client(timeout=timeout) as client:
+    with httpx.Client(timeout=timeout) as client:
+        for _ in range(retries):
+            try:
                 response = client.get(url)
                 response.raise_for_status()
                 return response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            last_error = exc
-    if last_error is None:
-        raise RuntimeError(f"Could not fetch feed {url}")
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = exc
     raise RuntimeError(f"Could not fetch feed {url}: {last_error}") from last_error
 
 
@@ -72,6 +70,13 @@ def _write_json_file(path: Path, payload: Any) -> None:
     tmp_path.replace(path)
 
 
+def _validate_payload(
+    payload: Any,
+    model_type: type[Player] | type[Fixture] | type[NewsSignal],
+) -> list[Player] | list[Fixture] | list[NewsSignal]:
+    return [model_type.model_validate(item) for item in payload]
+
+
 def _load_dataset(
     name: str,
     model_type: type[Player] | type[Fixture] | type[NewsSignal],
@@ -81,13 +86,13 @@ def _load_dataset(
     if feed_url:
         try:
             payload = _fetch_json(feed_url)
-            records = [model_type.model_validate(item) for item in payload]
-            return records, {"status": "live", "source": feed_url}
+            records = _validate_payload(payload, model_type)
+            return records, {"status": "live", "source": feed_url, "dataset": name}
         except RuntimeError:
             pass
 
     payload = _load_json_file(snapshot_path)
-    records = [model_type.model_validate(item) for item in payload]
+    records = _validate_payload(payload, model_type)
     source_type = "snapshot_fallback" if feed_url else "snapshot"
     return records, {"status": source_type, "source": str(snapshot_path), "dataset": name}
 
@@ -143,13 +148,22 @@ def refresh_snapshots_from_live_feeds() -> FeedBundle:
     fixtures_payload = _fetch_json(fixtures_url)
     news_payload = _fetch_json(news_url)
 
-    [Player.model_validate(item) for item in players_payload]
-    [Fixture.model_validate(item) for item in fixtures_payload]
-    [NewsSignal.model_validate(item) for item in news_payload]
+    validated_players = _validate_payload(players_payload, Player)
+    validated_fixtures = _validate_payload(fixtures_payload, Fixture)
+    validated_news = _validate_payload(news_payload, NewsSignal)
 
-    _write_json_file(_snapshot_path(PLAYERS_SNAPSHOT_PATH_ENV, DEFAULT_PLAYERS_SNAPSHOT_PATH), players_payload)
-    _write_json_file(_snapshot_path(FIXTURES_SNAPSHOT_PATH_ENV, DEFAULT_FIXTURES_SNAPSHOT_PATH), fixtures_payload)
-    _write_json_file(_snapshot_path(NEWS_SNAPSHOT_PATH_ENV, DEFAULT_NEWS_SNAPSHOT_PATH), news_payload)
+    _write_json_file(
+        _snapshot_path(PLAYERS_SNAPSHOT_PATH_ENV, DEFAULT_PLAYERS_SNAPSHOT_PATH),
+        [player.model_dump() for player in validated_players],
+    )
+    _write_json_file(
+        _snapshot_path(FIXTURES_SNAPSHOT_PATH_ENV, DEFAULT_FIXTURES_SNAPSHOT_PATH),
+        [fixture.model_dump() for fixture in validated_fixtures],
+    )
+    _write_json_file(
+        _snapshot_path(NEWS_SNAPSHOT_PATH_ENV, DEFAULT_NEWS_SNAPSHOT_PATH),
+        [signal.model_dump() for signal in validated_news],
+    )
 
     return load_feed_bundle()
 

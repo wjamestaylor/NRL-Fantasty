@@ -41,7 +41,7 @@
     "last_3_average": 57.7,
     "minutes_adjusted_base": 53.0,
     "opponent_modifier": 2,
-    "role_change_modifier": 2,
+    "role_change_modifier": 3,
     "role_risk": 0.18,
     "injury_risk": 0.1,
     "job_security_risk": 0.08,

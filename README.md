@@ -58,7 +58,7 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 ### Setup
 
 ```bash
-cd /tmp/workspace/wjamestaylor/NRL-Fantasty/backend
+cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -94,7 +94,7 @@ If any live source is unavailable, the API automatically falls back to validated
 You can refresh snapshots from live feeds for full-season coverage and late changes using:
 
 ```bash
-cd /tmp/workspace/wjamestaylor/NRL-Fantasty/backend
+cd backend
 NRL_PLAYERS_FEED_URL="https://<players-feed>" \
 NRL_FIXTURES_FEED_URL="https://<fixtures-feed>" \
 NRL_NEWS_FEED_URL="https://<news-feed>" \
@@ -103,7 +103,7 @@ python -m app.feed_ingestion
 
 Recommended production automation:
 - schedule snapshot refresh at least daily during the season
-- add an extra run shortly after team-list announcements to capture late role/injury changes
+- add an extra run shortly after team-list announcements (typically Tuesday evening AEST) to capture late role/injury changes
 
 ## Frontend (Next.js)
 
