@@ -13,14 +13,14 @@ app = FastAPI(title="Fantasy NRL Trade Lab API", version="0.1.0")
 
 @app.get("/players")
 def get_players() -> list[dict]:
-    return [player.model_dump() for player in PLAYERS]
+    return [player.model_dump(exclude_none=True) for player in PLAYERS]
 
 
 @app.get("/players/{player_id}")
 def get_player(player_id: str) -> dict:
     for player in PLAYERS:
         if player.id == player_id:
-            return player.model_dump()
+            return player.model_dump(exclude_none=True)
     raise HTTPException(status_code=404, detail="Player not found")
 
 
@@ -77,8 +77,16 @@ def get_bye_planner() -> dict:
 def get_data_source_health() -> dict:
     source_statuses = [source["status"] for source in DATA_SOURCE_HEALTH.values()]
     status = "degraded" if any(state == "snapshot_fallback" for state in source_statuses) else "ok"
+    breakeven_enabled = DATA_SOURCE_HEALTH["players"].get("breakeven_status") == "enabled"
     return {
         "status": status,
         "loaded_at": DATA_LOADED_AT,
         "sources": DATA_SOURCE_HEALTH,
+        "features": {
+            "player_breakeven": {
+                "enabled": breakeven_enabled,
+                "reason": DATA_SOURCE_HEALTH["players"].get("breakeven_reason"),
+                "coverage": DATA_SOURCE_HEALTH["players"].get("breakeven_coverage"),
+            }
+        },
     }

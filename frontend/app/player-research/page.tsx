@@ -1,8 +1,7 @@
-const fields = [
+const baseFields = [
   "price",
   "recent scores",
   "average",
-  "breakeven (placeholder for future data feed)",
   "rolling average",
   "minutes",
   "starting/bench role",
@@ -12,7 +11,32 @@ const fields = [
   "projection",
 ];
 
-export default function PlayerResearchPage() {
+async function isBreakevenAvailable(): Promise<boolean> {
+  const apiBaseUrl = process.env.NRL_API_BASE_URL;
+  if (!apiBaseUrl) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${apiBaseUrl}/health/data-sources`, {
+      next: { revalidate: 300 },
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const payload = (await response.json()) as {
+      features?: { player_breakeven?: { enabled?: boolean } };
+    };
+    return payload.features?.player_breakeven?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+export default async function PlayerResearchPage() {
+  const breakevenAvailable = await isBreakevenAvailable();
+  const fields = breakevenAvailable ? [...baseFields, "breakeven"] : baseFields;
+
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -25,6 +49,11 @@ export default function PlayerResearchPage() {
             <li key={field}>{field}</li>
           ))}
         </ul>
+        {!breakevenAvailable ? (
+          <p className="mt-4 text-sm text-slate-500">
+            Breakeven data will appear when available for all players.
+          </p>
+        ) : null}
       </div>
     </main>
   );
