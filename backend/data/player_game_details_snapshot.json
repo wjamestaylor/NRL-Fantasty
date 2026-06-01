@@ -1,0 +1,23 @@
+{
+  "P1": [
+    { "round": 1, "score": 58, "minutes": 68 },
+    { "round": 2, "score": 61, "minutes": 69 },
+    { "round": 3, "score": 63, "minutes": 71 },
+    { "round": 4, "score": 65, "minutes": 72 },
+    { "round": 5, "score": 61, "minutes": 70 }
+  ],
+  "P2": [
+    { "round": 1, "score": 49, "minutes": 74 },
+    { "round": 2, "score": 53, "minutes": 76 },
+    { "round": 3, "score": 55, "minutes": 74 },
+    { "round": 4, "score": 52, "minutes": 73 },
+    { "round": 5, "score": 50, "minutes": 72 }
+  ],
+  "P3": [
+    { "round": 1, "score": 34, "minutes": 61 },
+    { "round": 2, "score": 49, "minutes": 67 },
+    { "round": 3, "score": 58, "minutes": 70 },
+    { "round": 4, "score": 62, "minutes": 74 },
+    { "round": 5, "score": 53, "minutes": 69 }
+  ]
+}

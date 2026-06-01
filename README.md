@@ -68,7 +68,9 @@ uvicorn app.main:app --reload
 ### API endpoints
 
 - `GET /players`
+- `GET /players/analytics`
 - `GET /players/{id}`
+- `GET /players/{id}/analytics`
 - `GET /fixtures`
 - `GET /news/signals`
 - `POST /user-team/import`
@@ -84,12 +86,16 @@ The backend now loads player, fixture, and news data from configurable live feed
 - `NRL_PLAYERS_FEED_URL` -> live player stats feed (JSON array of `Player` objects, optional `breakeven` per player)
 - `NRL_FIXTURES_FEED_URL` -> live fixture feed (JSON array of `Fixture` objects)
 - `NRL_NEWS_FEED_URL` -> live news/alerts feed (JSON array of `NewsSignal` objects)
+- `NRL_PLAYER_PRICE_HISTORY_FEED_URL` -> optional live player price history feed
+- `NRL_PLAYER_GAME_DETAILS_FEED_URL` -> optional live player per-game detail feed
 
 If any live source is unavailable, the API automatically falls back to validated historical snapshots:
 
 - `backend/data/players_snapshot.json`
 - `backend/data/fixtures_snapshot.json`
 - `backend/data/news_snapshot.json`
+- `backend/data/player_price_history_snapshot.json`
+- `backend/data/player_game_details_snapshot.json`
 
 Breakeven support is automatically enabled only when every loaded player has `breakeven` populated. If coverage is incomplete, breakeven is disabled and omitted from player payloads to avoid partial/incorrect insight.
 

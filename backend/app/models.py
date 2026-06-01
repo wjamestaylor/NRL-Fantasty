@@ -5,6 +5,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class PlayerPricePoint(BaseModel):
+    round: int = Field(ge=1)
+    price: int = Field(ge=0)
+
+
+class PlayerGameDetail(BaseModel):
+    round: int = Field(ge=1)
+    score: float
+    minutes: int = Field(ge=0, le=80)
+
+
 class Player(BaseModel):
     id: str
     name: str
@@ -22,6 +33,8 @@ class Player(BaseModel):
     breakeven: int | None = None
     bye_rounds: list[int] = Field(default_factory=list)
     status: str = "available"
+    price_history: list[PlayerPricePoint] = Field(default_factory=list)
+    game_details: list[PlayerGameDetail] = Field(default_factory=list)
 
 
 class Fixture(BaseModel):

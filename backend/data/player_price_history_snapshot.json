@@ -1,0 +1,20 @@
+{
+  "P1": [
+    { "round": 1, "price": 731000 },
+    { "round": 2, "price": 742000 },
+    { "round": 3, "price": 751000 },
+    { "round": 4, "price": 760000 }
+  ],
+  "P2": [
+    { "round": 1, "price": 672000 },
+    { "round": 2, "price": 680000 },
+    { "round": 3, "price": 686000 },
+    { "round": 4, "price": 690000 }
+  ],
+  "P3": [
+    { "round": 1, "price": 505000 },
+    { "round": 2, "price": 520000 },
+    { "round": 3, "price": 537000 },
+    { "round": 4, "price": 545000 }
+  ]
+}
