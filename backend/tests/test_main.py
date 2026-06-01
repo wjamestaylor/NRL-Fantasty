@@ -109,12 +109,30 @@ def test_trade_recommend_endpoint_returns_grouped_recommendations() -> None:
         assert "trades" in rec
         assert "projected_gain_next_3" in rec
         assert "cash_impact" in rec
+        assert "confidence_score" in rec
+        assert "confidence_label" in rec
+        assert "news_flags" in rec
+        assert "risk_flags" in rec
         assert "explanation" in rec
         # Locked player P1 must never be traded out
         out_ids = {t["out_player_id"] for t in rec["trades"]}
         assert "P1" not in out_ids
         # must_sell P3 always traded out
         assert "P3" in out_ids
+
+
+def test_news_signals_endpoint_returns_phase5_fields() -> None:
+    response = client.get("/news/signals")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    first = payload[0]
+    assert "player_id" in first
+    assert "signal" in first
+    assert "confidence" in first
+    assert "category" in first
+    assert "impact_score" in first
 
 
 def test_trade_recommend_endpoint_rejects_invalid_trades_available() -> None:
@@ -148,6 +166,35 @@ def test_trade_recommend_endpoint_with_zero_bank_only_free_moves() -> None:
         assert rec["cash_impact"] >= 0
 
 
+def test_trade_simulate_returns_phase5_fields_for_valid_trade() -> None:
+    team_payload = {
+        "squad": ["P1", "P2", "P3"],
+        "bank": 500000,
+        "trades_available": 1,
+        "boosts_available": 0,
+        "strategy": "balanced",
+        "must_sell": ["P3"],
+    }
+    rec_response = client.post("/trade/recommend", json=team_payload)
+    assert rec_response.status_code == 200
+    recommendation = rec_response.json()["recommendations"][0]
+
+    sim_response = client.post(
+        "/trade/simulate",
+        json={
+            "team": team_payload,
+            "trades": recommendation["trades"],
+        },
+    )
+
+    assert sim_response.status_code == 200
+    simulation = sim_response.json()["simulation"]
+    assert "confidence_score" in simulation
+    assert "confidence_label" in simulation
+    assert "news_flags" in simulation
+    assert "risk_flags" in simulation
+
+
 def test_planner_bye_endpoint_returns_round_mapping() -> None:
     response = client.get("/planner/bye")
 
@@ -179,4 +226,3 @@ def test_planner_plan_endpoint_returns_phase4_payload() -> None:
     scenarios = {scenario["scenario"] for scenario in data["scenarios"]}
     assert scenarios == {"conservative", "balanced", "aggressive"}
     assert all(len(scenario["rounds"]) == 3 for scenario in data["scenarios"])
-

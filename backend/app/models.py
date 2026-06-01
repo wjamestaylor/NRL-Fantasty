@@ -46,7 +46,14 @@ class Fixture(BaseModel):
 class NewsSignal(BaseModel):
     player_id: str
     signal: str
-    confidence: Literal["low", "medium", "high"]
+    confidence: Literal["low", "medium", "high"] = "medium"
+    category: str = "general"
+    impact_score: float = 0.0
+    sentiment: str | None = None
+    availability_status: str | None = None
+    round: int | None = None
+    source: str | None = None
+    details: str | None = None
 
 
 class UserTeamImportRequest(BaseModel):
@@ -72,6 +79,10 @@ class TradeRecommendation(BaseModel):
     cash_impact: int
     bye_coverage_delta: float
     risk_score: float
+    confidence_score: float = Field(ge=0.0, le=1.0)
+    confidence_label: Literal["low", "medium", "high"]
+    news_flags: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
     total_trade_score: float
     explanation: str
 

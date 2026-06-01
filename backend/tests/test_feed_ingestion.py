@@ -415,3 +415,63 @@ def test_load_feed_bundle_records_last_error_on_fallback(
         assert health["status"] == "snapshot_fallback"
         assert "last_error" in health, f"{source_name} missing last_error on fallback"
         assert "unavailable" in health["last_error"]
+
+
+def test_load_feed_bundle_accepts_rich_news_signals_and_sets_phase5_metadata(
+    tmp_path: Path, monkeypatch
+) -> None:
+    players_path = tmp_path / "players.json"
+    fixtures_path = tmp_path / "fixtures.json"
+    news_path = tmp_path / "news.json"
+
+    _write_snapshot(
+        players_path,
+        [
+            {
+                "id": "P1",
+                "name": "Cameron Murray",
+                "team": "Rabbitohs",
+                "positions": ["MID"],
+                "price": 760000,
+                "season_average": 60,
+                "last_3_average": 62,
+                "minutes_adjusted_base": 61,
+                "opponent_modifier": 2,
+                "role_change_modifier": 0,
+                "role_risk": 0.1,
+                "injury_risk": 0.1,
+                "job_security_risk": 0.02,
+                "bye_rounds": [13],
+            }
+        ],
+    )
+    _write_snapshot(fixtures_path, [{"round": 1, "home_team": "Broncos", "away_team": "Roosters"}])
+    _write_snapshot(
+        news_path,
+        [
+            {
+                "player_id": "P1",
+                "signal": "hamstring concern",
+                "confidence": "high",
+                "category": "injury",
+                "impact_score": -0.6,
+                "sentiment": "negative",
+                "availability_status": "doubtful",
+                "round": 12,
+                "source": "teamlist",
+                "details": "Late fitness test",
+            }
+        ],
+    )
+
+    monkeypatch.setenv(feed_ingestion.PLAYERS_SNAPSHOT_PATH_ENV, str(players_path))
+    monkeypatch.setenv(feed_ingestion.FIXTURES_SNAPSHOT_PATH_ENV, str(fixtures_path))
+    monkeypatch.setenv(feed_ingestion.NEWS_SNAPSHOT_PATH_ENV, str(news_path))
+
+    bundle = feed_ingestion.load_feed_bundle()
+
+    signal = bundle.news_signals[0]
+    assert signal.category == "injury"
+    assert signal.availability_status == "doubtful"
+    assert signal.round == 12
+    assert bundle.source_health["news"]["phase5_capabilities"]["rich_news_fields"] is True

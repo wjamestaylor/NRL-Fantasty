@@ -39,11 +39,11 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 - [x] Position flexibility and squad structure scoring
 
 ### Phase 5 — News and risk intelligence
-- [ ] Automated team list and injury signal ingestion
-- [ ] Origin/rest risk tracking
-- [ ] Role change detection
-- [ ] Coach/news sentiment flags
-- [ ] Confidence scores on recommendations
+- [x] Automated team list and injury signal ingestion
+- [x] Origin/rest risk tracking
+- [x] Role change detection
+- [x] Coach/news sentiment flags
+- [x] Confidence scores on recommendations
 
 ### Phase 6 — Product polish
 - [ ] Navigation shared across all screens
@@ -98,8 +98,17 @@ Submit your team context to receive the best 1-, 2-, and 3-trade recommendations
       "cash_impact": 35000,
       "bye_coverage_delta": 0.05,
       "risk_score": 0.42,
+      "confidence_score": 0.74,
+      "confidence_label": "high",
+      "news_flags": [
+        "Hudson Young: team list: named",
+        "Hudson Young: role change upside"
+      ],
+      "risk_flags": [
+        "Hudson Young: origin watchlist"
+      ],
       "total_trade_score": 14.3,
-      "explanation": "Projected +18.5 pts over 3 rounds (+37.0 over 6). Cash impact: +$35,000 freed. Risk: low (score 0.42, strategy: balanced)."
+      "explanation": "Projected +18.5 pts over 3 rounds (+37.0 over 6). Cash impact: +$35,000 freed. Risk: low (score 0.42, strategy: balanced). Confidence: high (0.74). Signals: Hudson Young: origin watchlist."
     }
   ]
 }
@@ -123,6 +132,18 @@ Evaluate a specific trade combination against the recommendation engine.
 ```
 
 Returns the matching `TradeRecommendation` object if the trade is valid for the team/bank, or `400` if it is not.
+
+### `GET /news/signals`
+
+Returns structured news/risk signals per player. Legacy signal payloads (`player_id`, `signal`, `confidence`) remain valid, while richer payloads may also include:
+
+- `category` (`team_list`, `injury`, `origin_rest`, `role_change`, `coach_sentiment`, `general`)
+- `impact_score`
+- `sentiment`
+- `availability_status`
+- `round`
+- `source`
+- `details`
 
 ## Phase 4 — Planner API
 
