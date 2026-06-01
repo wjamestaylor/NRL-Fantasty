@@ -81,7 +81,8 @@ export default function SystemHealthPage() {
 
         if (logRes.ok) {
           const entries = (await logRes.json()) as IngestionLogEntry[];
-          setLog([...entries].reverse());
+          entries.reverse();
+          setLog(entries);
         }
       } catch {
         setError("Data pipeline monitoring unavailable. Start backend to view system health.");
