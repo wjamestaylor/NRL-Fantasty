@@ -108,7 +108,9 @@ def _resolve_breakeven_support(players: list[Player]) -> tuple[list[Player], dic
             "breakeven_coverage": f"{available_breakevens}/{total_players}",
         }
 
-    disabled_players = [player.model_copy(update={"breakeven": None}) for player in players]
+    disabled_players = players
+    for player in disabled_players:
+        player.breakeven = None
     reason = "feed_missing" if available_breakevens == 0 else "incomplete_feed"
     return disabled_players, {
         "breakeven_status": "disabled",

@@ -18,7 +18,9 @@ async function isBreakevenAvailable(): Promise<boolean> {
   }
 
   try {
-    const response = await fetch(`${apiBaseUrl}/health/data-sources`, { cache: "no-store" });
+    const response = await fetch(`${apiBaseUrl}/health/data-sources`, {
+      next: { revalidate: 300 },
+    });
     if (!response.ok) {
       return false;
     }
@@ -49,7 +51,7 @@ export default async function PlayerResearchPage() {
         </ul>
         {!breakevenAvailable ? (
           <p className="mt-4 text-sm text-slate-500">
-            Breakeven is hidden until the player feed reports complete coverage.
+            Breakeven appears after the player feed includes values for every loaded player.
           </p>
         ) : null}
       </div>
