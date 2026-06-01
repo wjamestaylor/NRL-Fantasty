@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 
-from .data import FIXTURES, NEWS_SIGNALS, PLAYERS
+from .data import DATA_LOADED_AT, DATA_SOURCE_HEALTH, FIXTURES, NEWS_SIGNALS, PLAYERS
 from .engine import recommend_trades
 from .models import (
     TradeRecommendationResponse,
@@ -75,23 +75,10 @@ def get_bye_planner() -> dict:
 
 @app.get("/health/data-sources")
 def get_data_source_health() -> dict:
+    source_states = [source["status"] for source in DATA_SOURCE_HEALTH.values()]
+    status = "degraded" if any(state == "snapshot_fallback" for state in source_states) else "ok"
     return {
-        "status": "ok",
-        "layers": [
-            {
-                "tier": 1,
-                "name": "official_sources",
-                "description": "NRL Fantasy official rules/pages and NRL editorial",
-            },
-            {
-                "tier": 2,
-                "name": "public_stat_sites",
-                "description": "Supplementary public trend/stat sources",
-            },
-            {
-                "tier": 3,
-                "name": "user_provided",
-                "description": "Manual roster and preference input",
-            },
-        ],
+        "status": status,
+        "loaded_at": DATA_LOADED_AT,
+        "sources": DATA_SOURCE_HEALTH,
     }

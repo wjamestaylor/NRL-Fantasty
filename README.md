@@ -77,6 +77,34 @@ uvicorn app.main:app --reload
 - `GET /planner/bye`
 - `GET /health/data-sources`
 
+## Data feeds and ingestion
+
+The backend now loads player, fixture, and news data from configurable live feeds with a validated historical snapshot fallback.
+
+- `NRL_PLAYERS_FEED_URL` -> live player stats feed (JSON array of `Player` objects)
+- `NRL_FIXTURES_FEED_URL` -> live fixture feed (JSON array of `Fixture` objects)
+- `NRL_NEWS_FEED_URL` -> live news/alerts feed (JSON array of `NewsSignal` objects)
+
+If any live source is unavailable, the API automatically falls back to validated historical snapshots:
+
+- `backend/data/players_snapshot.json`
+- `backend/data/fixtures_snapshot.json`
+- `backend/data/news_snapshot.json`
+
+You can refresh snapshots from live feeds for full-season coverage and late changes using:
+
+```bash
+cd /tmp/workspace/wjamestaylor/NRL-Fantasty/backend
+NRL_PLAYERS_FEED_URL="https://<players-feed>" \
+NRL_FIXTURES_FEED_URL="https://<fixtures-feed>" \
+NRL_NEWS_FEED_URL="https://<news-feed>" \
+python -m app.feed_ingestion
+```
+
+Recommended production automation:
+- schedule snapshot refresh at least daily during the season
+- add an extra run shortly after team-list announcements to capture late role/injury changes
+
 ## Frontend (Next.js)
 
 ```bash
