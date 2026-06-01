@@ -3,10 +3,12 @@ from fastapi import FastAPI, HTTPException, Query
 from .archive import VALID_DATASETS as _VALID_DATASETS
 from .archive import list_archived_dates, load_archived_snapshot
 from .data import DATA_LOADED_AT, DATA_SOURCE_HEALTH, FIXTURES, NEWS_SIGNALS, PLAYERS
-from .engine import project_player, recommend_trades
+from .engine import build_planner_plan, project_player, recommend_trades
 from .feed_ingestion import DEFAULT_DATA_DIR
 from .ingestion_log import read_ingestion_log
 from .models import (
+    PlannerPlanRequest,
+    PlannerPlanResponse,
     TradeRecommendationResponse,
     TradeSimulationRequest,
     UserTeamImportRequest,
@@ -128,6 +130,11 @@ def get_bye_planner() -> dict:
         for bye_round in player.bye_rounds:
             bye_map.setdefault(bye_round, []).append(player.id)
     return {"bye_rounds": bye_map}
+
+
+@app.post("/planner/plan", response_model=PlannerPlanResponse)
+def post_planner_plan(payload: PlannerPlanRequest) -> PlannerPlanResponse:
+    return build_planner_plan(payload)
 
 
 @app.get("/health/data-sources")

@@ -32,11 +32,11 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 - [x] Explain recommendations with projected points, cash impact, and risk
 
 ### Phase 4 — Planning and optimization
-- [ ] Bye-round coverage planner
-- [ ] Cash generation and price-change planning
-- [ ] Scenario modes: conservative, balanced, aggressive
-- [ ] Multi-round trade simulations
-- [ ] Position flexibility and squad structure scoring
+- [x] Bye-round coverage planner
+- [x] Cash generation and price-change planning
+- [x] Scenario modes: conservative, balanced, aggressive
+- [x] Multi-round trade simulations
+- [x] Position flexibility and squad structure scoring
 
 ### Phase 5 — News and risk intelligence
 - [ ] Automated team list and injury signal ingestion
@@ -124,6 +124,28 @@ Evaluate a specific trade combination against the recommendation engine.
 
 Returns the matching `TradeRecommendation` object if the trade is valid for the team/bank, or `400` if it is not.
 
+## Phase 4 — Planner API
+
+### `POST /planner/plan`
+
+Generate a planning view with bye coverage, cash outlook, structure scoring, and multi-round simulations.
+
+**Request body** (`PlannerPlanRequest`):
+
+```json
+{
+  "squad": ["P1", "P2", "P3", "P4"],
+  "bank": 200000,
+  "trades_available": 2,
+  "boosts_available": 1,
+  "strategy": "balanced",
+  "planning_horizon": 3,
+  "compare_all_scenarios": true
+}
+```
+
+`compare_all_scenarios=true` returns conservative/balanced/aggressive scenario outputs in one response; otherwise only the selected `strategy` is returned.
+
 ## Backend (FastAPI)
 
 ### Setup
@@ -148,6 +170,7 @@ uvicorn app.main:app --reload
 - `POST /trade/recommend`
 - `POST /trade/simulate`
 - `GET /planner/bye`
+- `POST /planner/plan`
 - `GET /health/data-sources`
 - `GET /history/snapshots`
 - `GET /history/snapshots/{dataset}/{date}`
