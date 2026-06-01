@@ -22,7 +22,7 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 - [ ] Add player prices, averages, rolling scores, minutes, and projections
 - [ ] Add breakeven support when a reliable feed is available
 - [x] Persist historical player and fixture snapshots
-- [ ] Add source health monitoring for data ingestion
+- [x] Add source health monitoring for data ingestion
 
 ### Phase 3 — Team-aware recommendations
 - [ ] Manual squad builder and editable roster management
@@ -80,6 +80,7 @@ uvicorn app.main:app --reload
 - `GET /health/data-sources`
 - `GET /history/snapshots`
 - `GET /history/snapshots/{dataset}/{date}`
+- `GET /health/ingestion-log`
 
 ## Historical snapshot archiving
 
@@ -166,6 +167,47 @@ Feature capability is exposed at `GET /health/data-sources` under:
 - `features.player_breakeven.enabled`
 - `features.player_breakeven.reason`
 - `features.player_breakeven.coverage`
+
+## Health monitoring and observability
+
+All data ingestion pipelines report per-source health, including ingestion timestamps, record counts, and error details. This enables monitoring, alerting, and audit of the data pipeline.
+
+### `GET /health/data-sources`
+
+Returns an overall `status` (`ok` or `degraded`), a list of active `alerts`, and a `sources` map with per-source health:
+
+- `status` — `live`, `snapshot`, `snapshot_fallback`, or `not_configured`
+- `record_count` — number of records loaded from this source
+- `ingested_at` — ISO 8601 timestamp of the last ingestion
+- `last_error` — error message if the live feed failed and a fallback was used
+
+`alerts` is populated with structured entries for:
+- `live_feed_failure` — live feed was unreachable; snapshot fallback is in use
+- `empty_dataset` — a required source loaded zero records
+
+### `GET /health/ingestion-log`
+
+Returns the most recent ingestion audit log entries (default 100, max 500 via `?limit=N`). Each entry contains:
+
+```json
+{
+  "timestamp": "2024-06-01T00:00:00+00:00",
+  "source": "players",
+  "status": "snapshot_fallback",
+  "record_count": 42,
+  "error": "Could not fetch feed https://...: ..."
+}
+```
+
+The log is persisted to `backend/data/ingestion_log.jsonl` (configurable via `NRL_INGESTION_LOG_PATH`).
+
+### Frontend dashboard
+
+The `/system-health` screen provides a live dashboard for system integrators showing:
+- Overall pipeline status
+- Per-source status badges, record counts, and last ingestion time
+- Active alerts for degraded or missing sources
+- Ingestion audit log (newest first)
 
 ## Frontend (Next.js)
 

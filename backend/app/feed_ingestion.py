@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,8 +11,11 @@ from typing import Any
 
 import httpx
 
+from . import ingestion_log as _ingestion_log
 from .archive import archive_snapshot
 from .models import Fixture, NewsSignal, Player
+
+_logger = logging.getLogger(__name__)
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 DEFAULT_PLAYERS_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "players_snapshot.json"
@@ -38,7 +42,7 @@ class FeedBundle:
     players: list[Player]
     fixtures: list[Fixture]
     news_signals: list[NewsSignal]
-    source_health: dict[str, dict[str, str]]
+    source_health: dict[str, dict[str, Any]]
     loaded_at: str
 
 
@@ -112,22 +116,84 @@ def _load_optional_player_supplemental_dataset(
     key: str,
     feed_url: str | None,
     snapshot_path: Path,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, str]]:
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    now = datetime.now(UTC).isoformat()
+
     if feed_url:
         try:
             payload = _fetch_json(feed_url)
             records = _normalize_player_supplemental_payload(payload, key)
-            return records, {"status": "live", "source": feed_url, "dataset": name}
-        except RuntimeError:
-            pass
+            count = len(records)
+            health: dict[str, Any] = {
+                "status": "live",
+                "source": feed_url,
+                "dataset": name,
+                "record_count": count,
+                "ingested_at": now,
+            }
+            _logger.info("Loaded %d records for %s from live feed %s", count, name, feed_url)
+            _ingestion_log.append_ingestion_event(source=name, status="live", record_count=count)
+            return records, health
+        except RuntimeError as exc:
+            last_error = str(exc)
+            _logger.warning("Live feed failed for %s: %s — falling back to snapshot", name, exc)
+            if snapshot_path.exists():
+                payload = _load_json_file(snapshot_path)
+                records = _normalize_player_supplemental_payload(payload, key)
+                count = len(records)
+                health = {
+                    "status": "snapshot_fallback",
+                    "source": str(snapshot_path),
+                    "dataset": name,
+                    "record_count": count,
+                    "ingested_at": now,
+                    "last_error": last_error,
+                }
+                _logger.info(
+                    "Loaded %d records for %s from snapshot (fallback)", count, name
+                )
+                _ingestion_log.append_ingestion_event(
+                    source=name, status="snapshot_fallback", record_count=count, error=last_error
+                )
+                return records, health
+            health = {
+                "status": "not_configured",
+                "source": "none",
+                "dataset": name,
+                "record_count": 0,
+                "ingested_at": now,
+                "last_error": last_error,
+            }
+            _ingestion_log.append_ingestion_event(
+                source=name, status="not_configured", record_count=0, error=last_error
+            )
+            return {}, health
 
     if snapshot_path.exists():
         payload = _load_json_file(snapshot_path)
         records = _normalize_player_supplemental_payload(payload, key)
-        source_type = "snapshot_fallback" if feed_url else "snapshot"
-        return records, {"status": source_type, "source": str(snapshot_path), "dataset": name}
+        count = len(records)
+        health = {
+            "status": "snapshot",
+            "source": str(snapshot_path),
+            "dataset": name,
+            "record_count": count,
+            "ingested_at": now,
+        }
+        _logger.info("Loaded %d records for %s from snapshot", count, name)
+        _ingestion_log.append_ingestion_event(source=name, status="snapshot", record_count=count)
+        return records, health
 
-    return {}, {"status": "not_configured", "source": "none", "dataset": name}
+    health = {
+        "status": "not_configured",
+        "source": "none",
+        "dataset": name,
+        "record_count": 0,
+        "ingested_at": now,
+    }
+    _logger.info("Source %s is not configured (no feed URL or snapshot)", name)
+    _ingestion_log.append_ingestion_event(source=name, status="not_configured", record_count=0)
+    return {}, health
 
 
 def _load_dataset(
@@ -135,19 +201,47 @@ def _load_dataset(
     model_type: type[Player] | type[Fixture] | type[NewsSignal],
     feed_url: str | None,
     snapshot_path: Path,
-) -> tuple[list[Player] | list[Fixture] | list[NewsSignal], dict[str, str]]:
+) -> tuple[list[Player] | list[Fixture] | list[NewsSignal], dict[str, Any]]:
+    now = datetime.now(UTC).isoformat()
+    last_error: str | None = None
+
     if feed_url:
         try:
             payload = _fetch_json(feed_url)
             records = _validate_payload(payload, model_type)
-            return records, {"status": "live", "source": feed_url, "dataset": name}
-        except RuntimeError:
-            pass
+            count = len(records)
+            health: dict[str, Any] = {
+                "status": "live",
+                "source": feed_url,
+                "dataset": name,
+                "record_count": count,
+                "ingested_at": now,
+            }
+            _logger.info("Loaded %d records for %s from live feed %s", count, name, feed_url)
+            _ingestion_log.append_ingestion_event(source=name, status="live", record_count=count)
+            return records, health
+        except RuntimeError as exc:
+            last_error = str(exc)
+            _logger.warning("Live feed failed for %s: %s — falling back to snapshot", name, exc)
 
     payload = _load_json_file(snapshot_path)
     records = _validate_payload(payload, model_type)
+    count = len(records)
     source_type = "snapshot_fallback" if feed_url else "snapshot"
-    return records, {"status": source_type, "source": str(snapshot_path), "dataset": name}
+    health = {
+        "status": source_type,
+        "source": str(snapshot_path),
+        "dataset": name,
+        "record_count": count,
+        "ingested_at": now,
+    }
+    if last_error is not None:
+        health["last_error"] = last_error
+    _logger.info("Loaded %d records for %s from %s (%s)", count, name, snapshot_path, source_type)
+    _ingestion_log.append_ingestion_event(
+        source=name, status=source_type, record_count=count, error=last_error
+    )
+    return records, health
 
 
 def _resolve_breakeven_support(players: list[Player]) -> tuple[list[Player], dict[str, str]]:
