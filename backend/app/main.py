@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 
 from .data import DATA_LOADED_AT, DATA_SOURCE_HEALTH, FIXTURES, NEWS_SIGNALS, PLAYERS
 from .engine import project_player, recommend_trades
+from .ingestion_log import read_ingestion_log
 from .models import (
     TradeRecommendationResponse,
     TradeSimulationRequest,
@@ -128,12 +129,29 @@ def get_bye_planner() -> dict:
 
 @app.get("/health/data-sources")
 def get_data_source_health() -> dict:
-    source_statuses = [source["status"] for source in DATA_SOURCE_HEALTH.values()]
-    status = "degraded" if any(state == "snapshot_fallback" for state in source_statuses) else "ok"
+    # Detect anomalies and surface them as structured alerts
+    alerts = []
+    required_sources = {"players", "fixtures", "news"}
+    for source_name, source_info in DATA_SOURCE_HEALTH.items():
+        if source_info.get("status") == "snapshot_fallback":
+            alerts.append({
+                "source": source_name,
+                "type": "live_feed_failure",
+                "message": f"{source_name}: live feed unavailable, using snapshot fallback",
+            })
+        if source_name in required_sources and source_info.get("record_count", -1) == 0:
+            alerts.append({
+                "source": source_name,
+                "type": "empty_dataset",
+                "message": f"{source_name}: no records loaded — possible data outage",
+            })
+
+    overall_status = "degraded" if alerts else "ok"
     breakeven_enabled = DATA_SOURCE_HEALTH["players"].get("breakeven_status") == "enabled"
     return {
-        "status": status,
+        "status": overall_status,
         "loaded_at": DATA_LOADED_AT,
+        "alerts": alerts,
         "sources": DATA_SOURCE_HEALTH,
         "features": {
             "player_breakeven": {
@@ -143,3 +161,9 @@ def get_data_source_health() -> dict:
             }
         },
     }
+
+
+@app.get("/health/ingestion-log")
+def get_ingestion_log(limit: int = Query(default=100, ge=1, le=500)) -> list[dict]:
+    """Return the most recent ingestion audit log entries."""
+    return read_ingestion_log(max_entries=limit)

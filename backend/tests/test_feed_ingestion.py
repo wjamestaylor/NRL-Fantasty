@@ -314,3 +314,104 @@ def test_load_feed_bundle_enables_breakeven_when_feed_is_complete(
     assert bundle.source_health["players"]["breakeven_status"] == "enabled"
     assert bundle.source_health["players"]["breakeven_reason"] == "complete_coverage"
     assert bundle.players[0].breakeven == 58
+
+
+def test_load_feed_bundle_includes_record_count_and_ingested_at(
+    tmp_path: Path, monkeypatch
+) -> None:
+    players_path = tmp_path / "players.json"
+    fixtures_path = tmp_path / "fixtures.json"
+    news_path = tmp_path / "news.json"
+
+    _write_snapshot(
+        players_path,
+        [
+            {
+                "id": "P1",
+                "name": "Cameron Murray",
+                "team": "Rabbitohs",
+                "positions": ["MID"],
+                "price": 760000,
+                "season_average": 60,
+                "last_3_average": 62,
+                "minutes_adjusted_base": 61,
+                "opponent_modifier": 2,
+                "role_change_modifier": 0,
+                "role_risk": 0.1,
+                "injury_risk": 0.1,
+                "job_security_risk": 0.02,
+                "bye_rounds": [13],
+            }
+        ],
+    )
+    _write_snapshot(fixtures_path, [{"round": 1, "home_team": "Broncos", "away_team": "Roosters"}])
+    _write_snapshot(news_path, [{"player_id": "P1", "signal": "fit", "confidence": "high"}])
+
+    monkeypatch.setenv(feed_ingestion.PLAYERS_SNAPSHOT_PATH_ENV, str(players_path))
+    monkeypatch.setenv(feed_ingestion.FIXTURES_SNAPSHOT_PATH_ENV, str(fixtures_path))
+    monkeypatch.setenv(feed_ingestion.NEWS_SNAPSHOT_PATH_ENV, str(news_path))
+
+    bundle = feed_ingestion.load_feed_bundle()
+
+    for source_name in ("players", "fixtures", "news"):
+        health = bundle.source_health[source_name]
+        assert "record_count" in health, f"{source_name} missing record_count"
+        assert "ingested_at" in health, f"{source_name} missing ingested_at"
+        assert isinstance(health["record_count"], int)
+        assert isinstance(health["ingested_at"], str)
+
+    assert bundle.source_health["players"]["record_count"] == 1
+    assert bundle.source_health["fixtures"]["record_count"] == 1
+    assert bundle.source_health["news"]["record_count"] == 1
+
+
+def test_load_feed_bundle_records_last_error_on_fallback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    players_path = tmp_path / "players.json"
+    fixtures_path = tmp_path / "fixtures.json"
+    news_path = tmp_path / "news.json"
+
+    _write_snapshot(
+        players_path,
+        [
+            {
+                "id": "P1",
+                "name": "Cameron Murray",
+                "team": "Rabbitohs",
+                "positions": ["MID"],
+                "price": 760000,
+                "season_average": 60,
+                "last_3_average": 62,
+                "minutes_adjusted_base": 61,
+                "opponent_modifier": 2,
+                "role_change_modifier": 0,
+                "role_risk": 0.1,
+                "injury_risk": 0.1,
+                "job_security_risk": 0.02,
+                "bye_rounds": [13],
+            }
+        ],
+    )
+    _write_snapshot(fixtures_path, [{"round": 1, "home_team": "Broncos", "away_team": "Roosters"}])
+    _write_snapshot(news_path, [{"player_id": "P1", "signal": "fit", "confidence": "high"}])
+
+    monkeypatch.setenv(feed_ingestion.PLAYERS_SNAPSHOT_PATH_ENV, str(players_path))
+    monkeypatch.setenv(feed_ingestion.FIXTURES_SNAPSHOT_PATH_ENV, str(fixtures_path))
+    monkeypatch.setenv(feed_ingestion.NEWS_SNAPSHOT_PATH_ENV, str(news_path))
+    monkeypatch.setenv(feed_ingestion.PLAYERS_FEED_URL_ENV, "https://invalid/players")
+    monkeypatch.setenv(feed_ingestion.FIXTURES_FEED_URL_ENV, "https://invalid/fixtures")
+    monkeypatch.setenv(feed_ingestion.NEWS_FEED_URL_ENV, "https://invalid/news")
+
+    def fake_fetch_json(url: str, retries: int = 3) -> list[dict]:
+        raise RuntimeError(f"unavailable: {url}")
+
+    monkeypatch.setattr(feed_ingestion, "_fetch_json", fake_fetch_json)
+
+    bundle = feed_ingestion.load_feed_bundle()
+
+    for source_name in ("players", "fixtures", "news"):
+        health = bundle.source_health[source_name]
+        assert health["status"] == "snapshot_fallback"
+        assert "last_error" in health, f"{source_name} missing last_error on fallback"
+        assert "unavailable" in health["last_error"]
