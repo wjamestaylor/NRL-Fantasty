@@ -110,6 +110,14 @@ def list_archived_dates(data_dir: Path, dataset: str) -> list[str]:
     return dates
 
 
+def _assert_within_archive(data_dir: Path, path: Path) -> None:
+    """Raise ValueError if *path* escapes the archive directory tree."""
+    archive_root = _archive_dir(data_dir).resolve()
+    resolved = path.resolve()
+    if not str(resolved).startswith(str(archive_root)):
+        raise ValueError(f"Resolved path {resolved} is outside the archive directory {archive_root}")
+
+
 def load_archived_snapshot(data_dir: Path, dataset: str, snapshot_date: str) -> Any:
     """Load and return the archived payload for *dataset* on *snapshot_date*.
 
@@ -124,6 +132,7 @@ def load_archived_snapshot(data_dir: Path, dataset: str, snapshot_date: str) -> 
         raise ValueError(f"Invalid date format {snapshot_date!r}; expected YYYY-MM-DD") from exc
 
     path = _archive_path(data_dir, dataset, parsed_date)
+    _assert_within_archive(data_dir, path)
     if not path.exists():
         raise FileNotFoundError(f"No archive for dataset={dataset!r} date={parsed_date.isoformat()!r}")
     return _read_gz(path)
@@ -173,7 +182,7 @@ def purge_player_from_archives(data_dir: Path, player_id: str) -> list[Path]:
     for path in sorted(players_dir.glob("*.json.gz")):
         try:
             payload = _read_gz(path)
-        except Exception:
+        except (gzip.BadGzipFile, json.JSONDecodeError, OSError):
             continue
 
         if not isinstance(payload, list):
