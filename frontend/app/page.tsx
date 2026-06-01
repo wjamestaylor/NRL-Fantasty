@@ -12,6 +12,7 @@ const screens = [
   { href: "/player-research", name: "Player Research" },
   { href: "/planner", name: "Planner" },
   { href: "/news", name: "News & Alerts" },
+  { href: "/system-health", name: "System Health" },
 ];
 
 export default function Home() {
