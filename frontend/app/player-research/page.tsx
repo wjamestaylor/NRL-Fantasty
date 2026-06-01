@@ -51,7 +51,7 @@ export default async function PlayerResearchPage() {
         </ul>
         {!breakevenAvailable ? (
           <p className="mt-4 text-sm text-slate-500">
-            Breakeven appears after the player feed includes values for every loaded player.
+            Breakeven data will appear when available for all players.
           </p>
         ) : null}
       </div>
