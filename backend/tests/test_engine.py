@@ -1,4 +1,6 @@
+import app.engine as engine
 from app.engine import (
+    _trade_news_intelligence,
     _risk_label,
     build_planner_plan,
     cash_generation_outlook,
@@ -6,7 +8,7 @@ from app.engine import (
     recommend_trades,
     squad_structure_score,
 )
-from app.models import PlannerPlanRequest, Player, UserTeamImportRequest
+from app.models import NewsSignal, PlannerPlanRequest, Player, UserTeamImportRequest
 
 
 def test_projection_formula_matches_v1_weights() -> None:
@@ -141,6 +143,27 @@ def test_recommend_trades_explanation_includes_risk_and_strategy() -> None:
     assert "aggressive" in explanation
     assert "pts" in explanation
     assert "Cash impact" in explanation
+    assert "Confidence:" in explanation
+
+
+def test_recommend_trades_includes_phase5_confidence_and_flags() -> None:
+    request = UserTeamImportRequest(
+        squad=["P1", "P2", "P3"],
+        bank=500000,
+        trades_available=1,
+        boosts_available=0,
+        strategy="balanced",
+        must_sell=["P3"],
+    )
+
+    recommendations = recommend_trades(request)
+
+    assert recommendations
+    rec = recommendations[0]
+    assert 0.0 <= rec.confidence_score <= 1.0
+    assert rec.confidence_label in {"low", "medium", "high"}
+    assert isinstance(rec.news_flags, list)
+    assert isinstance(rec.risk_flags, list)
 
 
 def test_recommend_trades_budget_constraint_respected() -> None:
@@ -275,3 +298,75 @@ def test_squad_structure_score_counts_dual_positions() -> None:
     assert structure.dual_position_count == 1
     assert structure.position_counts["MID"] == 1
     assert structure.position_counts["HOK"] == 1
+
+
+def test_trade_news_intelligence_processes_signals_and_computes_confidence(monkeypatch) -> None:
+    in_player = Player(
+        id="IN1",
+        name="Incoming",
+        team="Broncos",
+        positions=["HLF"],
+        price=700000,
+        season_average=60,
+        last_3_average=62,
+        minutes_adjusted_base=60,
+        opponent_modifier=2,
+        role_change_modifier=3,
+        role_risk=0.1,
+        injury_risk=0.05,
+        job_security_risk=0.05,
+    )
+    out_player = Player(
+        id="OUT1",
+        name="Outgoing",
+        team="Raiders",
+        positions=["HLF"],
+        price=700000,
+        season_average=58,
+        last_3_average=54,
+        minutes_adjusted_base=55,
+        opponent_modifier=0,
+        role_change_modifier=-2,
+        role_risk=0.2,
+        injury_risk=0.2,
+        job_security_risk=0.15,
+    )
+    monkeypatch.setattr(
+        engine,
+        "NEWS_SIGNALS",
+        [
+            NewsSignal(
+                player_id="IN1",
+                signal="named in starting side",
+                confidence="high",
+                category="team_list",
+                sentiment="positive",
+                availability_status="available",
+            ),
+            NewsSignal(
+                player_id="IN1",
+                signal="coach quote boost",
+                confidence="medium",
+                category="coach_sentiment",
+                sentiment="positive",
+            ),
+            NewsSignal(
+                player_id="OUT1",
+                signal="hamstring injury concern",
+                confidence="high",
+                category="injury",
+                availability_status="out",
+            ),
+        ],
+    )
+
+    confidence_score, confidence_label, news_flags, risk_flags, _adjustment = _trade_news_intelligence(
+        (out_player,),
+        (in_player,),
+    )
+
+    assert confidence_score > 0.5
+    assert confidence_label in {"medium", "high"}
+    assert any("team list: named" in flag for flag in news_flags)
+    assert any("coach sentiment positive" in flag for flag in news_flags)
+    assert any("origin watchlist" in flag for flag in risk_flags)

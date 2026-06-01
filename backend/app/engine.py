@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from itertools import combinations, permutations
 from typing import Literal, cast
 
-from .data import FIXTURES, PLAYERS
+from .data import FIXTURES, NEWS_SIGNALS, PLAYERS
 from .models import (
     ByeRoundCoverage,
     CashGenerationOutlook,
+    NewsSignal,
     PlannerPlanRequest,
     PlannerPlanResponse,
     Player,
@@ -34,6 +35,31 @@ STRATEGY_CONFIG: dict[str, StrategyConfig] = {
 }
 PRICE_SENSITIVITY_FACTOR = 850
 MOMENTUM_WEIGHT = 0.4
+BASE_CONFIDENCE_SCORE = 0.62
+CONFIDENCE_BASELINE = 0.5
+CONFIDENCE_ADJUSTMENT_FACTOR = 0.75
+MAX_RECOMMENDATION_FLAGS = 6
+MAX_EXPLANATION_FLAGS = 2
+LOW_CONFIDENCE_THRESHOLD = 0.45
+MEDIUM_CONFIDENCE_THRESHOLD = 0.7
+ORIGIN_RISK_TEAMS = {
+    "Broncos",
+    "Cowboys",
+    "Dolphins",
+    "Panthers",
+    "Rabbitohs",
+    "Raiders",
+    "Roosters",
+    "Sharks",
+    "Storm",
+}
+
+
+@dataclass
+class PlayerSignalSummary:
+    news_flags: list[str]
+    risk_flags: list[str]
+    confidence_delta: float
 
 
 def project_player(player: Player) -> float:
@@ -62,6 +88,158 @@ def _bye_coverage_score(players: tuple[Player, ...]) -> float:
 def _risk_score(players: tuple[Player, ...], strategy: str) -> float:
     base = sum((p.role_risk + p.injury_risk + p.job_security_risk) for p in players)
     return base * STRATEGY_CONFIG[strategy].risk_multiplier
+
+
+def _news_index() -> dict[str, list[NewsSignal]]:
+    grouped: dict[str, list[NewsSignal]] = {}
+    for signal in NEWS_SIGNALS:
+        grouped.setdefault(signal.player_id, []).append(signal)
+    return grouped
+
+
+def _dedupe_flags(flags: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for flag in flags:
+        if flag in seen:
+            continue
+        seen.add(flag)
+        ordered.append(flag)
+    return ordered
+
+
+def _signal_confidence_multiplier(confidence: str) -> float:
+    return {"low": 0.8, "medium": 1.0, "high": 1.2}.get(confidence.lower(), 1.0)
+
+
+def _confidence_label(score: float) -> str:
+    if score < LOW_CONFIDENCE_THRESHOLD:
+        return "low"
+    if score < MEDIUM_CONFIDENCE_THRESHOLD:
+        return "medium"
+    return "high"
+
+
+def _summarize_player_signals(player: Player, signals: list[NewsSignal]) -> PlayerSignalSummary:
+    news_flags: list[str] = []
+    risk_flags: list[str] = []
+    confidence_delta = 0.0
+
+    for signal in signals:
+        category = signal.category.lower()
+        text = f"{signal.signal} {signal.details or ''}".lower()
+        sentiment = (signal.sentiment or "").lower()
+        availability = (signal.availability_status or "").lower()
+        conf_scale = _signal_confidence_multiplier(signal.confidence)
+        impact = signal.impact_score * conf_scale
+
+        team_list_phrases = (
+            "named in starting side",
+            "named in squad",
+            "named to start",
+            "starting side",
+            "team list confirmed",
+        )
+        if category == "team_list" or any(phrase in text for phrase in team_list_phrases):
+            news_flags.append("team list: named")
+            confidence_delta += 0.08 * conf_scale + max(impact, 0.0) * 0.04
+
+        if (
+            category == "injury"
+            or "injury" in text
+            or "hamstring" in text
+            or "concussion" in text
+            or "suspension" in text
+        ):
+            risk_flags.append("injury concern")
+            confidence_delta -= 0.12 * conf_scale + abs(min(impact, 0.0)) * 0.04
+
+        if category == "origin_rest" or "origin" in text or "rest" in text:
+            risk_flags.append("origin/rest risk")
+            confidence_delta -= 0.09 * conf_scale
+
+        if category == "role_change" or "role" in text:
+            if player.role_change_modifier >= 0:
+                news_flags.append("role change upside")
+                confidence_delta += 0.06 * conf_scale + max(impact, 0.0) * 0.03
+            else:
+                risk_flags.append("role change downside")
+                confidence_delta -= 0.06 * conf_scale
+
+        if category == "coach_sentiment" or "coach" in text or "quote" in text:
+            if sentiment == "positive" or "boost" in text or "locked" in text:
+                news_flags.append("coach sentiment positive")
+                confidence_delta += 0.05 * conf_scale
+            elif sentiment == "negative" or "downgrade" in text or "concern" in text:
+                risk_flags.append("coach sentiment negative")
+                confidence_delta -= 0.05 * conf_scale
+
+        if sentiment == "positive":
+            confidence_delta += 0.03 * conf_scale
+        elif sentiment == "negative":
+            confidence_delta -= 0.04 * conf_scale
+
+        if availability in {"available", "named"}:
+            news_flags.append("availability confirmed")
+            confidence_delta += 0.06 * conf_scale
+        elif availability in {"doubtful", "out", "rested"}:
+            risk_flags.append(f"availability {availability}")
+            confidence_delta -= 0.08 * conf_scale
+
+    if abs(player.role_change_modifier) >= 2:
+        if player.role_change_modifier > 0:
+            news_flags.append("role indicator positive")
+            confidence_delta += 0.05
+        else:
+            risk_flags.append("role indicator negative")
+            confidence_delta -= 0.05
+
+    if player.team in ORIGIN_RISK_TEAMS and player.season_average >= 55:
+        risk_flags.append("origin watchlist")
+        confidence_delta -= 0.03
+
+    if player.status.lower() != "available":
+        risk_flags.append(f"status {player.status.lower()}")
+        confidence_delta -= 0.1
+
+    if player.injury_risk >= 0.2:
+        risk_flags.append("model injury risk")
+        confidence_delta -= 0.04
+
+    return PlayerSignalSummary(
+        news_flags=_dedupe_flags(news_flags),
+        risk_flags=_dedupe_flags(risk_flags),
+        confidence_delta=confidence_delta,
+    )
+
+
+def _trade_news_intelligence(
+    out_players: tuple[Player, ...], in_players: tuple[Player, ...]
+) -> tuple[float, str, list[str], list[str], float]:
+    by_player = _news_index()
+    news_flags: list[str] = []
+    risk_flags: list[str] = []
+
+    confidence_score = BASE_CONFIDENCE_SCORE
+    for player in in_players:
+        summary = _summarize_player_signals(player, by_player.get(player.id, []))
+        confidence_score += summary.confidence_delta
+        news_flags.extend(f"{player.name}: {flag}" for flag in summary.news_flags)
+        risk_flags.extend(f"{player.name}: {flag}" for flag in summary.risk_flags)
+
+    for player in out_players:
+        summary = _summarize_player_signals(player, by_player.get(player.id, []))
+        if summary.risk_flags:
+            confidence_score += min(0.08, 0.02 * len(summary.risk_flags))
+            news_flags.append(f"{player.name}: risk-off trade out")
+
+    confidence_score = max(0.0, min(1.0, confidence_score))
+    confidence_label = _confidence_label(confidence_score)
+
+    news_flags = _dedupe_flags(news_flags)[:MAX_RECOMMENDATION_FLAGS]
+    risk_flags = _dedupe_flags(risk_flags)[:MAX_RECOMMENDATION_FLAGS]
+    confidence_adjustment = (confidence_score - CONFIDENCE_BASELINE) * CONFIDENCE_ADJUSTMENT_FACTOR
+    return confidence_score, confidence_label, news_flags, risk_flags, confidence_adjustment
 
 
 def _trade_score(
@@ -145,9 +323,19 @@ def recommend_trades(request: UserTeamImportRequest, top_n: int = 3) -> list[Tra
                     risk_score,
                     trade_score,
                 ) = _trade_score(outs, ins, request.strategy)
+                (
+                    confidence_score,
+                    confidence_label,
+                    news_flags,
+                    risk_flags,
+                    confidence_adjustment,
+                ) = _trade_news_intelligence(outs, ins)
+                trade_score += confidence_adjustment
 
                 risk_label = _risk_label(risk_score)
                 cash_desc = f"${abs(cash_impact):,} {'freed' if cash_impact >= 0 else 'spent'}"
+                combined_flags = (risk_flags + news_flags)[:MAX_EXPLANATION_FLAGS]
+                primary_flags = ", ".join(combined_flags) if combined_flags else "no major signals"
                 candidates.append(
                     TradeRecommendation(
                         trade_count=trade_count,
@@ -160,11 +348,19 @@ def recommend_trades(request: UserTeamImportRequest, top_n: int = 3) -> list[Tra
                         cash_impact=cash_impact,
                         bye_coverage_delta=round(bye_delta, 3),
                         risk_score=round(risk_score, 3),
+                        confidence_score=round(confidence_score, 3),
+                        confidence_label=cast(
+                            Literal["low", "medium", "high"], confidence_label
+                        ),
+                        news_flags=news_flags,
+                        risk_flags=risk_flags,
                         total_trade_score=round(trade_score, 2),
                         explanation=(
                             f"Projected {gain_3:+.1f} pts over 3 rounds ({gain_6:+.1f} over 6). "
                             f"Cash impact: {cash_desc}. "
-                            f"Risk: {risk_label} (score {risk_score:.2f}, strategy: {request.strategy})."
+                            f"Risk: {risk_label} (score {risk_score:.2f}, strategy: {request.strategy}). "
+                            f"Confidence: {confidence_label} ({confidence_score:.2f}). "
+                            f"Signals: {primary_flags}."
                         ),
                     )
                 )

@@ -298,6 +298,19 @@ def load_feed_bundle() -> FeedBundle:
         feed_url=os.getenv(NEWS_FEED_URL_ENV),
         snapshot_path=news_snapshot,
     )
+    news_health = news_health | {
+        "phase5_capabilities": {
+            "rich_news_fields": True,
+            "categories_supported": [
+                "team_list",
+                "injury",
+                "origin_rest",
+                "role_change",
+                "coach_sentiment",
+                "general",
+            ],
+        }
+    }
     price_history_by_player, price_history_health = _load_optional_player_supplemental_dataset(
         name="player_price_history",
         key="price_history",
