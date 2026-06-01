@@ -135,6 +135,13 @@ def test_news_signals_endpoint_returns_phase5_fields() -> None:
     assert "impact_score" in first
 
 
+def test_team_game_stats_endpoint_returns_list() -> None:
+    response = client.get("/teams/game-stats")
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
 def test_trade_recommend_endpoint_rejects_invalid_trades_available() -> None:
     payload = {
         "squad": ["P1"],

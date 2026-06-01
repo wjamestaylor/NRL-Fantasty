@@ -43,6 +43,15 @@ class Fixture(BaseModel):
     away_team: str
 
 
+class TeamGameStat(BaseModel):
+    round: int = Field(ge=1)
+    team: str
+    opponent: str
+    points_for: int = Field(ge=0)
+    points_against: int = Field(ge=0)
+    result: Literal["W", "L", "D"] | None = None
+
+
 class NewsSignal(BaseModel):
     player_id: str
     signal: str

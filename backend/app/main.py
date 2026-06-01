@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Query
 
 from .archive import VALID_DATASETS as _VALID_DATASETS
 from .archive import list_archived_dates, load_archived_snapshot
-from .data import DATA_LOADED_AT, DATA_SOURCE_HEALTH, FIXTURES, NEWS_SIGNALS, PLAYERS
+from .data import DATA_LOADED_AT, DATA_SOURCE_HEALTH, FIXTURES, NEWS_SIGNALS, PLAYERS, TEAM_GAME_STATS
 from .engine import build_planner_plan, project_player, recommend_trades
 from .feed_ingestion import DEFAULT_DATA_DIR
 from .ingestion_log import read_ingestion_log
@@ -91,6 +91,11 @@ def get_fixtures() -> list[dict]:
 @app.get("/news/signals")
 def get_news_signals() -> list[dict]:
     return [signal.model_dump() for signal in NEWS_SIGNALS]
+
+
+@app.get("/teams/game-stats")
+def get_team_game_stats() -> list[dict]:
+    return [stat.model_dump(exclude_none=True) for stat in TEAM_GAME_STATS]
 
 
 @app.post("/user-team/import")

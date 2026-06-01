@@ -13,7 +13,8 @@ import httpx
 
 from . import ingestion_log as _ingestion_log
 from .archive import archive_snapshot
-from .models import Fixture, NewsSignal, Player
+from .models import Fixture, NewsSignal, Player, TeamGameStat
+from .website_stats import scrape_player_stats, scrape_team_game_stats
 
 _logger = logging.getLogger(__name__)
 
@@ -23,18 +24,22 @@ DEFAULT_FIXTURES_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "fixtures_snapshot.json"
 DEFAULT_NEWS_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "news_snapshot.json"
 DEFAULT_PLAYER_PRICE_HISTORY_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "player_price_history_snapshot.json"
 DEFAULT_PLAYER_GAME_DETAILS_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "player_game_details_snapshot.json"
+DEFAULT_TEAM_GAME_STATS_SNAPSHOT_PATH = DEFAULT_DATA_DIR / "team_game_stats_snapshot.json"
 
 PLAYERS_FEED_URL_ENV = "NRL_PLAYERS_FEED_URL"
 FIXTURES_FEED_URL_ENV = "NRL_FIXTURES_FEED_URL"
 NEWS_FEED_URL_ENV = "NRL_NEWS_FEED_URL"
 PLAYER_PRICE_HISTORY_FEED_URL_ENV = "NRL_PLAYER_PRICE_HISTORY_FEED_URL"
 PLAYER_GAME_DETAILS_FEED_URL_ENV = "NRL_PLAYER_GAME_DETAILS_FEED_URL"
+PLAYER_STATS_WEBSITE_URL_ENV = "NRL_PLAYER_STATS_WEBSITE_URL"
+TEAM_GAME_STATS_WEBSITE_URL_ENV = "NRL_TEAM_GAME_STATS_WEBSITE_URL"
 
 PLAYERS_SNAPSHOT_PATH_ENV = "NRL_PLAYERS_SNAPSHOT_PATH"
 FIXTURES_SNAPSHOT_PATH_ENV = "NRL_FIXTURES_SNAPSHOT_PATH"
 NEWS_SNAPSHOT_PATH_ENV = "NRL_NEWS_SNAPSHOT_PATH"
 PLAYER_PRICE_HISTORY_SNAPSHOT_PATH_ENV = "NRL_PLAYER_PRICE_HISTORY_SNAPSHOT_PATH"
 PLAYER_GAME_DETAILS_SNAPSHOT_PATH_ENV = "NRL_PLAYER_GAME_DETAILS_SNAPSHOT_PATH"
+TEAM_GAME_STATS_SNAPSHOT_PATH_ENV = "NRL_TEAM_GAME_STATS_SNAPSHOT_PATH"
 
 
 @dataclass(frozen=True)
@@ -42,6 +47,7 @@ class FeedBundle:
     players: list[Player]
     fixtures: list[Fixture]
     news_signals: list[NewsSignal]
+    team_game_stats: list[TeamGameStat]
     source_health: dict[str, dict[str, Any]]
     loaded_at: str
 
@@ -83,8 +89,8 @@ def _write_json_file(path: Path, payload: Any) -> None:
 
 def _validate_payload(
     payload: Any,
-    model_type: type[Player] | type[Fixture] | type[NewsSignal],
-) -> list[Player] | list[Fixture] | list[NewsSignal]:
+    model_type: type[Player] | type[Fixture] | type[NewsSignal] | type[TeamGameStat],
+) -> list[Player] | list[Fixture] | list[NewsSignal] | list[TeamGameStat]:
     return [model_type.model_validate(item) for item in payload]
 
 
@@ -198,10 +204,10 @@ def _load_optional_player_supplemental_dataset(
 
 def _load_dataset(
     name: str,
-    model_type: type[Player] | type[Fixture] | type[NewsSignal],
+    model_type: type[Player] | type[Fixture] | type[NewsSignal] | type[TeamGameStat],
     feed_url: str | None,
     snapshot_path: Path,
-) -> tuple[list[Player] | list[Fixture] | list[NewsSignal], dict[str, Any]]:
+) -> tuple[list[Player] | list[Fixture] | list[NewsSignal] | list[TeamGameStat], dict[str, Any]]:
     now = datetime.now(UTC).isoformat()
     last_error: str | None = None
 
@@ -244,6 +250,155 @@ def _load_dataset(
     return records, health
 
 
+def _load_players_dataset(
+    feed_url: str | None,
+    website_url: str | None,
+    snapshot_path: Path,
+) -> tuple[list[Player], dict[str, Any]]:
+    now = datetime.now(UTC).isoformat()
+    last_error: str | None = None
+
+    if feed_url:
+        try:
+            payload = _fetch_json(feed_url)
+            records = _validate_payload(payload, Player)
+            count = len(records)
+            health: dict[str, Any] = {
+                "status": "live",
+                "source": feed_url,
+                "dataset": "players",
+                "record_count": count,
+                "ingested_at": now,
+            }
+            _logger.info("Loaded %d records for players from live feed %s", count, feed_url)
+            _ingestion_log.append_ingestion_event(source="players", status="live", record_count=count)
+            return records, health
+        except RuntimeError as exc:
+            last_error = str(exc)
+            _logger.warning("Live feed failed for players: %s", exc)
+
+    if website_url:
+        try:
+            records = scrape_player_stats(website_url)
+            count = len(records)
+            health = {
+                "status": "website",
+                "source": website_url,
+                "dataset": "players",
+                "record_count": count,
+                "ingested_at": now,
+            }
+            _logger.info("Loaded %d records for players from website %s", count, website_url)
+            _ingestion_log.append_ingestion_event(source="players", status="website", record_count=count)
+            return records, health
+        except RuntimeError as exc:
+            last_error = str(exc)
+            _logger.warning("Website scrape failed for players: %s", exc)
+
+    payload = _load_json_file(snapshot_path)
+    records = _validate_payload(payload, Player)
+    count = len(records)
+    source_type = "snapshot"
+    if feed_url or website_url:
+        source_type = "snapshot_fallback"
+    health = {
+        "status": source_type,
+        "source": str(snapshot_path),
+        "dataset": "players",
+        "record_count": count,
+        "ingested_at": now,
+    }
+    if last_error is not None:
+        health["last_error"] = last_error
+    _logger.info("Loaded %d records for players from %s (%s)", count, snapshot_path, source_type)
+    _ingestion_log.append_ingestion_event(
+        source="players", status=source_type, record_count=count, error=last_error
+    )
+    return records, health
+
+
+def _load_optional_team_game_stats_dataset(
+    website_url: str | None,
+    snapshot_path: Path,
+) -> tuple[list[TeamGameStat], dict[str, Any]]:
+    now = datetime.now(UTC).isoformat()
+
+    if website_url:
+        try:
+            records = scrape_team_game_stats(website_url)
+            count = len(records)
+            health: dict[str, Any] = {
+                "status": "website",
+                "source": website_url,
+                "dataset": "team_game_stats",
+                "record_count": count,
+                "ingested_at": now,
+            }
+            _logger.info("Loaded %d records for team_game_stats from website %s", count, website_url)
+            _ingestion_log.append_ingestion_event(source="team_game_stats", status="website", record_count=count)
+            return records, health
+        except RuntimeError as exc:
+            last_error = str(exc)
+            _logger.warning(
+                "Website scrape failed for team_game_stats: %s — falling back to snapshot", exc
+            )
+            if snapshot_path.exists():
+                payload = _load_json_file(snapshot_path)
+                records = _validate_payload(payload, TeamGameStat)
+                count = len(records)
+                health = {
+                    "status": "snapshot_fallback",
+                    "source": str(snapshot_path),
+                    "dataset": "team_game_stats",
+                    "record_count": count,
+                    "ingested_at": now,
+                    "last_error": last_error,
+                }
+                _ingestion_log.append_ingestion_event(
+                    source="team_game_stats",
+                    status="snapshot_fallback",
+                    record_count=count,
+                    error=last_error,
+                )
+                return records, health
+            health = {
+                "status": "not_configured",
+                "source": "none",
+                "dataset": "team_game_stats",
+                "record_count": 0,
+                "ingested_at": now,
+                "last_error": last_error,
+            }
+            _ingestion_log.append_ingestion_event(
+                source="team_game_stats", status="not_configured", record_count=0, error=last_error
+            )
+            return [], health
+
+    if snapshot_path.exists():
+        payload = _load_json_file(snapshot_path)
+        records = _validate_payload(payload, TeamGameStat)
+        count = len(records)
+        health = {
+            "status": "snapshot",
+            "source": str(snapshot_path),
+            "dataset": "team_game_stats",
+            "record_count": count,
+            "ingested_at": now,
+        }
+        _ingestion_log.append_ingestion_event(source="team_game_stats", status="snapshot", record_count=count)
+        return records, health
+
+    health = {
+        "status": "not_configured",
+        "source": "none",
+        "dataset": "team_game_stats",
+        "record_count": 0,
+        "ingested_at": now,
+    }
+    _ingestion_log.append_ingestion_event(source="team_game_stats", status="not_configured", record_count=0)
+    return [], health
+
+
 def _resolve_breakeven_support(players: list[Player]) -> tuple[list[Player], dict[str, str]]:
     total_players = len(players)
     available_breakevens = sum(player.breakeven is not None for player in players)
@@ -279,11 +434,14 @@ def load_feed_bundle() -> FeedBundle:
         PLAYER_GAME_DETAILS_SNAPSHOT_PATH_ENV,
         DEFAULT_PLAYER_GAME_DETAILS_SNAPSHOT_PATH,
     )
+    team_game_stats_snapshot = _snapshot_path(
+        TEAM_GAME_STATS_SNAPSHOT_PATH_ENV,
+        DEFAULT_TEAM_GAME_STATS_SNAPSHOT_PATH,
+    )
 
-    players, players_health = _load_dataset(
-        name="players",
-        model_type=Player,
+    players, players_health = _load_players_dataset(
         feed_url=os.getenv(PLAYERS_FEED_URL_ENV),
+        website_url=os.getenv(PLAYER_STATS_WEBSITE_URL_ENV),
         snapshot_path=players_snapshot,
     )
     fixtures, fixtures_health = _load_dataset(
@@ -323,6 +481,10 @@ def load_feed_bundle() -> FeedBundle:
         feed_url=os.getenv(PLAYER_GAME_DETAILS_FEED_URL_ENV),
         snapshot_path=player_game_details_snapshot,
     )
+    team_game_stats, team_game_stats_health = _load_optional_team_game_stats_dataset(
+        website_url=os.getenv(TEAM_GAME_STATS_WEBSITE_URL_ENV),
+        snapshot_path=team_game_stats_snapshot,
+    )
     players, breakeven_health = _resolve_breakeven_support(players)
 
     enriched_players: list[Player] = []
@@ -342,12 +504,14 @@ def load_feed_bundle() -> FeedBundle:
         players=enriched_players,
         fixtures=fixtures,
         news_signals=news,
+        team_game_stats=team_game_stats,
         source_health={
             "players": players_health | breakeven_health,
             "fixtures": fixtures_health,
             "news": news_health,
             "player_price_history": price_history_health,
             "player_game_details": game_details_health,
+            "team_game_stats": team_game_stats_health,
         },
         loaded_at=datetime.now(UTC).isoformat(),
     )
