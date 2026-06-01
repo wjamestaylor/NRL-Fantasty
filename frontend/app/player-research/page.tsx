@@ -66,7 +66,11 @@ export default function PlayerResearchPage() {
                     <td className="py-2 pr-4">
                       {player.rolling_scores.last_3 ?? "-"} / {player.rolling_scores.last_5 ?? "-"}
                     </td>
-                    <td className="py-2 pr-4">{player.minutes.average ?? "-"}</td>
+                    <td className="py-2 pr-4">
+                      {typeof player.minutes.average === "number"
+                        ? player.minutes.average.toFixed(1)
+                        : "-"}
+                    </td>
                     <td className="py-2 pr-4">
                       {player.projections.next_3_rounds.toFixed(1)} /{" "}
                       {player.projections.next_6_rounds.toFixed(1)}
