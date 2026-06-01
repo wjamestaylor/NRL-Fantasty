@@ -38,13 +38,27 @@ DEFAULT_ARCHIVE_SUBDIR = "archive"
 ARCHIVE_DIR_ENV = "NRL_ARCHIVE_DIR"
 
 # Datasets that are allowed as archive targets / query subjects.
-# Restricting to a fixed set prevents path-traversal via the dataset parameter.
+# The *values* are string literals (trusted by static analysis), so using
+# this dict as an indirection from user-supplied dataset names to path
+# components breaks the taint-tracking chain from user input to file access.
 VALID_DATASETS: frozenset[str] = frozenset({"players", "fixtures", "news"})
+_DATASET_PATH_SEGMENT: dict[str, str] = {
+    "players": "players",
+    "fixtures": "fixtures",
+    "news": "news",
+}
+
+
+def _safe_dataset_segment(dataset: str) -> str:
+    """Return the trusted path segment for *dataset*, raising ValueError if unknown."""
+    segment = _DATASET_PATH_SEGMENT.get(dataset)
+    if segment is None:
+        raise ValueError(f"Unknown dataset {dataset!r}. Valid datasets: {sorted(VALID_DATASETS)}")
+    return segment
 
 
 def _validate_dataset(dataset: str) -> None:
-    if dataset not in VALID_DATASETS:
-        raise ValueError(f"Unknown dataset {dataset!r}. Valid datasets: {sorted(VALID_DATASETS)}")
+    _safe_dataset_segment(dataset)
 
 
 def _archive_dir(data_dir: Path) -> Path:
@@ -54,12 +68,12 @@ def _archive_dir(data_dir: Path) -> Path:
     return data_dir / DEFAULT_ARCHIVE_SUBDIR
 
 
-def _dataset_dir(data_dir: Path, dataset: str) -> Path:
-    return _archive_dir(data_dir) / dataset
+def _dataset_dir(data_dir: Path, safe_segment: str) -> Path:
+    return _archive_dir(data_dir) / safe_segment
 
 
-def _archive_path(data_dir: Path, dataset: str, snapshot_date: date) -> Path:
-    return _dataset_dir(data_dir, dataset) / f"{snapshot_date.isoformat()}.json.gz"
+def _archive_path(data_dir: Path, safe_segment: str, snapshot_date: date) -> Path:
+    return _dataset_dir(data_dir, safe_segment) / f"{snapshot_date.isoformat()}.json.gz"
 
 
 def _write_gz(path: Path, payload: Any) -> None:
@@ -84,9 +98,9 @@ def archive_snapshot(data_dir: Path, dataset: str, payload: Any, snapshot_date: 
 
     Returns the path of the written archive file.
     """
-    _validate_dataset(dataset)
+    safe_segment = _safe_dataset_segment(dataset)
     effective_date = snapshot_date or datetime.now(UTC).date()
-    dest = _archive_path(data_dir, dataset, effective_date)
+    dest = _archive_path(data_dir, safe_segment, effective_date)
     _write_gz(dest, payload)
     return dest
 
@@ -98,8 +112,8 @@ def _stem(path: Path) -> str:
 
 def list_archived_dates(data_dir: Path, dataset: str) -> list[str]:
     """Return a sorted list of ISO date strings for which an archive exists."""
-    _validate_dataset(dataset)
-    dataset_dir = _dataset_dir(data_dir, dataset)
+    safe_segment = _safe_dataset_segment(dataset)
+    dataset_dir = _dataset_dir(data_dir, safe_segment)
     if not dataset_dir.is_dir():
         return []
     dates = sorted(
@@ -110,14 +124,6 @@ def list_archived_dates(data_dir: Path, dataset: str) -> list[str]:
     return dates
 
 
-def _assert_within_archive(data_dir: Path, path: Path) -> None:
-    """Raise ValueError if *path* escapes the archive directory tree."""
-    archive_root = _archive_dir(data_dir).resolve()
-    resolved = path.resolve()
-    if not str(resolved).startswith(str(archive_root)):
-        raise ValueError(f"Resolved path {resolved} is outside the archive directory {archive_root}")
-
-
 def load_archived_snapshot(data_dir: Path, dataset: str, snapshot_date: str) -> Any:
     """Load and return the archived payload for *dataset* on *snapshot_date*.
 
@@ -125,7 +131,7 @@ def load_archived_snapshot(data_dir: Path, dataset: str, snapshot_date: str) -> 
 
     Raises ``FileNotFoundError`` if no archive exists for that date.
     """
-    _validate_dataset(dataset)
+    safe_segment = _safe_dataset_segment(dataset)
     try:
         parsed_date = date.fromisoformat(snapshot_date)
     except ValueError as exc:
@@ -133,12 +139,12 @@ def load_archived_snapshot(data_dir: Path, dataset: str, snapshot_date: str) -> 
 
     # Build the path lookup from a trusted directory glob so that the path
     # used for file access is always derived from the filesystem listing, not
-    # directly from user input.  This prevents any residual path-traversal risk
-    # regardless of how the user-supplied date string is formatted.
-    dataset_dir = _dataset_dir(data_dir, dataset)
-    safe_index: dict[str, Path] = {
-        _stem(p): p for p in dataset_dir.glob("*.json.gz") if dataset_dir.is_dir()
-    }
+    # directly from user input.  The safe_segment is a string literal from
+    # _DATASET_PATH_SEGMENT, so dataset_dir is fully trusted.
+    dataset_dir = _dataset_dir(data_dir, safe_segment)
+    safe_index: dict[str, Path] = {}
+    if dataset_dir.is_dir():
+        safe_index = {_stem(p): p for p in dataset_dir.glob("*.json.gz")}
     trusted_path = safe_index.get(parsed_date.isoformat())
     if trusted_path is None:
         raise FileNotFoundError(f"No archive for dataset={dataset!r} date={parsed_date.isoformat()!r}")
@@ -153,9 +159,9 @@ def prune_archive(data_dir: Path, dataset: str, keep_days: int) -> list[Path]:
     if keep_days < 1:
         raise ValueError("keep_days must be at least 1")
 
-    _validate_dataset(dataset)
+    safe_segment = _safe_dataset_segment(dataset)
     cutoff = datetime.now(UTC).date() - timedelta(days=keep_days)
-    dataset_dir = _dataset_dir(data_dir, dataset)
+    dataset_dir = _dataset_dir(data_dir, safe_segment)
     if not dataset_dir.is_dir():
         return []
 
