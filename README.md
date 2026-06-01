@@ -25,11 +25,11 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 - [x] Add source health monitoring for data ingestion
 
 ### Phase 3 — Team-aware recommendations
-- [ ] Manual squad builder and editable roster management
-- [ ] Bank, trades remaining, and boost tracking
-- [ ] Locked players / must-sell player controls
-- [ ] Best 1-, 2-, and 3-trade recommendation engine
-- [ ] Explain recommendations with projected points, cash impact, and risk
+- [x] Manual squad builder and editable roster management
+- [x] Bank, trades remaining, and boost tracking
+- [x] Locked players / must-sell player controls
+- [x] Best 1-, 2-, and 3-trade recommendation engine
+- [x] Explain recommendations with projected points, cash impact, and risk
 
 ### Phase 4 — Planning and optimization
 - [ ] Bye-round coverage planner
@@ -52,6 +52,77 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 - [ ] Authentication
 - [ ] Visual charts for trends, projections, and planning
 - [ ] Deployment, CI, and production monitoring
+
+## Phase 3 — Trade recommendation API
+
+### `POST /trade/recommend`
+
+Submit your team context to receive the best 1-, 2-, and 3-trade recommendations.
+
+**Request body** (`UserTeamImportRequest`):
+
+```json
+{
+  "squad": ["P1", "P2", "P3"],
+  "bank": 150000,
+  "trades_available": 2,
+  "boosts_available": 1,
+  "strategy": "balanced",
+  "locked_players": ["P1"],
+  "must_sell": ["P3"]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `squad` | `string[]` | Player IDs currently in your squad |
+| `bank` | `int ≥ 0` | Available transfer budget in dollars |
+| `trades_available` | `int 0–3` | Remaining trades this round |
+| `boosts_available` | `int ≥ 0` | Remaining boosts (tracked; reserved for Phase 4 scoring) |
+| `strategy` | `"conservative" \| "balanced" \| "aggressive"` | Risk multiplier applied to trade scoring |
+| `locked_players` | `string[]` | Player IDs that must **not** be traded out |
+| `must_sell` | `string[]` | Player IDs that **must** appear as outgoing trades |
+
+**Response** (`TradeRecommendationResponse`):
+
+```json
+{
+  "recommendations": [
+    {
+      "trade_count": 1,
+      "trades": [
+        { "out_player_id": "P3", "in_player_id": "P7" }
+      ],
+      "projected_gain_next_3": 18.5,
+      "projected_gain_next_6": 37.0,
+      "cash_impact": 35000,
+      "bye_coverage_delta": 0.05,
+      "risk_score": 0.42,
+      "total_trade_score": 14.3,
+      "explanation": "Projected +18.5 pts over 3 rounds (+37.0 over 6). Cash impact: +$35,000 freed. Risk: low (score 0.42, strategy: balanced)."
+    }
+  ]
+}
+```
+
+Results are ordered by `trade_count` (1-trade first, then 2-trade, then 3-trade), with up to 3 recommendations per group sorted by `total_trade_score` descending.
+
+### `POST /trade/simulate`
+
+Evaluate a specific trade combination against the recommendation engine.
+
+**Request body** (`TradeSimulationRequest`):
+
+```json
+{
+  "team": { ...same as UserTeamImportRequest... },
+  "trades": [
+    { "out_player_id": "P3", "in_player_id": "P7" }
+  ]
+}
+```
+
+Returns the matching `TradeRecommendation` object if the trade is valid for the team/bank, or `400` if it is not.
 
 ## Backend (FastAPI)
 

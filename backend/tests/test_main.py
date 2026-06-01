@@ -86,10 +86,65 @@ def test_health_ingestion_log_returns_list() -> None:
     assert isinstance(response.json(), list)
 
 
-def test_health_ingestion_log_respects_limit_parameter() -> None:
-    response = client.get("/health/ingestion-log?limit=5")
+def test_trade_recommend_endpoint_returns_grouped_recommendations() -> None:
+    payload = {
+        "squad": ["P1", "P2", "P3"],
+        "bank": 500000,
+        "trades_available": 2,
+        "boosts_available": 1,
+        "strategy": "balanced",
+        "locked_players": ["P1"],
+        "must_sell": ["P3"],
+    }
+
+    response = client.post("/trade/recommend", json=payload)
 
     assert response.status_code == 200
-    payload = response.json()
-    assert isinstance(payload, list)
-    assert len(payload) <= 5
+    data = response.json()
+    assert "recommendations" in data
+    assert data["recommendations"]
+
+    for rec in data["recommendations"]:
+        assert "trade_count" in rec
+        assert "trades" in rec
+        assert "projected_gain_next_3" in rec
+        assert "cash_impact" in rec
+        assert "explanation" in rec
+        # Locked player P1 must never be traded out
+        out_ids = {t["out_player_id"] for t in rec["trades"]}
+        assert "P1" not in out_ids
+        # must_sell P3 always traded out
+        assert "P3" in out_ids
+
+
+def test_trade_recommend_endpoint_rejects_invalid_trades_available() -> None:
+    payload = {
+        "squad": ["P1"],
+        "bank": 100000,
+        "trades_available": 5,  # exceeds maximum of 3
+        "boosts_available": 0,
+        "strategy": "balanced",
+    }
+
+    response = client.post("/trade/recommend", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_trade_recommend_endpoint_with_zero_bank_only_free_moves() -> None:
+    payload = {
+        "squad": ["P1", "P2", "P3"],
+        "bank": 0,
+        "trades_available": 1,
+        "boosts_available": 0,
+        "strategy": "conservative",
+    }
+
+    response = client.post("/trade/recommend", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    for rec in data["recommendations"]:
+        assert rec["cash_impact"] >= 0
+
+

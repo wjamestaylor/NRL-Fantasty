@@ -65,6 +65,7 @@ class TradePair(BaseModel):
 
 
 class TradeRecommendation(BaseModel):
+    trade_count: int
     trades: list[TradePair]
     projected_gain_next_3: float
     projected_gain_next_6: float

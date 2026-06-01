@@ -87,7 +87,7 @@ def _player_index() -> dict[str, Player]:
     return {player.id: player for player in PLAYERS}
 
 
-def recommend_trades(request: UserTeamImportRequest, top_n: int = 5) -> list[TradeRecommendation]:
+def recommend_trades(request: UserTeamImportRequest, top_n: int = 3) -> list[TradeRecommendation]:
     idx = _player_index()
     squad_players = [idx[player_id] for player_id in request.squad if player_id in idx]
     squad_ids = {player.id for player in squad_players}
@@ -102,13 +102,16 @@ def recommend_trades(request: UserTeamImportRequest, top_n: int = 5) -> list[Tra
 
     in_pool = [p for p in PLAYERS if p.id not in squad_ids and p.status == "available"]
 
-    recommendations: list[TradeRecommendation] = []
     max_trades = min(max(request.trades_available, 1), 3)
+
+    # Collect best top_n recommendations per trade count so all groups are represented
+    by_trade_count: dict[int, list[TradeRecommendation]] = {}
 
     for trade_count in range(1, max_trades + 1):
         if len(out_pool) < trade_count or len(in_pool) < trade_count:
             continue
 
+        candidates: list[TradeRecommendation] = []
         for outs in combinations(out_pool, trade_count):
             for ins in combinations(in_pool, trade_count):
                 cost = sum(i.price for i in ins) - sum(o.price for o in outs)
@@ -126,8 +129,11 @@ def recommend_trades(request: UserTeamImportRequest, top_n: int = 5) -> list[Tra
                     trade_score,
                 ) = _trade_score(outs, ins, request.strategy)
 
-                recommendations.append(
+                risk_label = _risk_label(risk_score)
+                cash_desc = f"${abs(cash_impact):,} {'freed' if cash_impact >= 0 else 'spent'}"
+                candidates.append(
                     TradeRecommendation(
+                        trade_count=trade_count,
                         trades=[
                             TradePair(out_player_id=out.id, in_player_id=ins[idx].id)
                             for idx, out in enumerate(outs)
@@ -139,11 +145,26 @@ def recommend_trades(request: UserTeamImportRequest, top_n: int = 5) -> list[Tra
                         risk_score=round(risk_score, 3),
                         total_trade_score=round(trade_score, 2),
                         explanation=(
-                            f"Projected {gain_3:.1f} pts gain over 3 rounds and {gain_6:.1f} over 6. "
-                            f"Cash impact ${cash_impact:,}. Risk {risk_score:.2f}."
+                            f"Projected {gain_3:+.1f} pts over 3 rounds ({gain_6:+.1f} over 6). "
+                            f"Cash impact: {cash_desc}. "
+                            f"Risk: {risk_label} (score {risk_score:.2f}, strategy: {request.strategy})."
                         ),
                     )
                 )
 
-    recommendations.sort(key=lambda rec: rec.total_trade_score, reverse=True)
-    return recommendations[:top_n]
+        candidates.sort(key=lambda rec: rec.total_trade_score, reverse=True)
+        by_trade_count[trade_count] = candidates[:top_n]
+
+    # Return all groups in order (1-trade first, then 2-trade, then 3-trade)
+    result: list[TradeRecommendation] = []
+    for tc in sorted(by_trade_count):
+        result.extend(by_trade_count[tc])
+    return result
+
+
+def _risk_label(risk_score: float) -> str:
+    if risk_score < 0.5:
+        return "low"
+    if risk_score < 1.0:
+        return "medium"
+    return "high"
