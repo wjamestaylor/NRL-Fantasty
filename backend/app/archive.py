@@ -131,11 +131,18 @@ def load_archived_snapshot(data_dir: Path, dataset: str, snapshot_date: str) -> 
     except ValueError as exc:
         raise ValueError(f"Invalid date format {snapshot_date!r}; expected YYYY-MM-DD") from exc
 
-    path = _archive_path(data_dir, dataset, parsed_date)
-    _assert_within_archive(data_dir, path)
-    if not path.exists():
+    # Build the path lookup from a trusted directory glob so that the path
+    # used for file access is always derived from the filesystem listing, not
+    # directly from user input.  This prevents any residual path-traversal risk
+    # regardless of how the user-supplied date string is formatted.
+    dataset_dir = _dataset_dir(data_dir, dataset)
+    safe_index: dict[str, Path] = {
+        _stem(p): p for p in dataset_dir.glob("*.json.gz") if dataset_dir.is_dir()
+    }
+    trusted_path = safe_index.get(parsed_date.isoformat())
+    if trusted_path is None:
         raise FileNotFoundError(f"No archive for dataset={dataset!r} date={parsed_date.isoformat()!r}")
-    return _read_gz(path)
+    return _read_gz(trusted_path)
 
 
 def prune_archive(data_dir: Path, dataset: str, keep_days: int) -> list[Path]:
