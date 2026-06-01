@@ -328,7 +328,9 @@ export default function TradeLabPage() {
             />
             <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto">
               {filteredPlayers.length === 0 ? (
-                <li className="text-sm text-slate-400">No players match your search.</li>
+                <li className="text-sm text-slate-400">
+                  {allPlayers.length === 0 && !loadError ? "Loading players…" : "No players match your search."}
+                </li>
               ) : (
                 filteredPlayers.map((player) => (
                   <li
