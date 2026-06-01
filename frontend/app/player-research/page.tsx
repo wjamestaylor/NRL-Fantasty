@@ -12,20 +12,35 @@ type PlayerAnalytics = {
   projections: { next_3_rounds: number; next_6_rounds: number };
 };
 
+type DataSourceHealth = {
+  features?: { player_breakeven?: { enabled?: boolean } };
+};
+
 export default function PlayerResearchPage() {
   const [players, setPlayers] = useState<PlayerAnalytics[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [breakevenAvailable, setBreakevenAvailable] = useState(false);
 
   useEffect(() => {
     const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
     const load = async () => {
       try {
-        const response = await fetch(`${baseUrl}/players/analytics`);
-        if (!response.ok) {
+        const [analyticsResponse, healthResponse] = await Promise.all([
+          fetch(`${baseUrl}/players/analytics`),
+          fetch(`${baseUrl}/health/data-sources`),
+        ]);
+
+        if (!analyticsResponse.ok) {
           throw new Error("Failed to load player analytics");
         }
-        setPlayers((await response.json()) as PlayerAnalytics[]);
+
+        setPlayers((await analyticsResponse.json()) as PlayerAnalytics[]);
+
+        if (healthResponse.ok) {
+          const healthPayload = (await healthResponse.json()) as DataSourceHealth;
+          setBreakevenAvailable(healthPayload.features?.player_breakeven?.enabled === true);
+        }
       } catch {
         setError("Player analytics feed unavailable. Start backend to view enriched stats.");
       }
@@ -81,6 +96,11 @@ export default function PlayerResearchPage() {
             </table>
           </div>
         )}
+        {!error && !breakevenAvailable ? (
+          <p className="mt-4 text-sm text-slate-500">
+            Breakeven data will appear when available for all players.
+          </p>
+        ) : null}
       </div>
     </main>
   );

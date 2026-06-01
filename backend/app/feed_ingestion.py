@@ -149,6 +149,29 @@ def _load_dataset(
     return records, {"status": source_type, "source": str(snapshot_path), "dataset": name}
 
 
+def _resolve_breakeven_support(players: list[Player]) -> tuple[list[Player], dict[str, str]]:
+    total_players = len(players)
+    available_breakevens = sum(player.breakeven is not None for player in players)
+
+    if total_players > 0 and available_breakevens == total_players:
+        return players, {
+            "breakeven_status": "enabled",
+            "breakeven_reason": "complete_coverage",
+            "breakeven_coverage": f"{available_breakevens}/{total_players}",
+        }
+
+    disabled_players = [
+        player if player.breakeven is None else player.model_copy(update={"breakeven": None})
+        for player in players
+    ]
+    reason = "feed_missing" if available_breakevens == 0 else "incomplete_feed"
+    return disabled_players, {
+        "breakeven_status": "disabled",
+        "breakeven_reason": reason,
+        "breakeven_coverage": f"{available_breakevens}/{total_players}",
+    }
+
+
 def load_feed_bundle() -> FeedBundle:
     players_snapshot = _snapshot_path(PLAYERS_SNAPSHOT_PATH_ENV, DEFAULT_PLAYERS_SNAPSHOT_PATH)
     fixtures_snapshot = _snapshot_path(FIXTURES_SNAPSHOT_PATH_ENV, DEFAULT_FIXTURES_SNAPSHOT_PATH)
@@ -192,6 +215,7 @@ def load_feed_bundle() -> FeedBundle:
         feed_url=os.getenv(PLAYER_GAME_DETAILS_FEED_URL_ENV),
         snapshot_path=player_game_details_snapshot,
     )
+    players, breakeven_health = _resolve_breakeven_support(players)
 
     enriched_players: list[Player] = []
     for player in players:
@@ -211,7 +235,7 @@ def load_feed_bundle() -> FeedBundle:
         fixtures=fixtures,
         news_signals=news,
         source_health={
-            "players": players_health,
+            "players": players_health | breakeven_health,
             "fixtures": fixtures_health,
             "news": news_health,
             "player_price_history": price_history_health,
