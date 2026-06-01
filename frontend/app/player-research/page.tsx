@@ -224,8 +224,8 @@ export default function PlayerResearchPage() {
                         : "-"}
                     </td>
                     <td className="py-3 pr-4">
-                      {player.projections.next_round.toFixed(1)} / {" "}
-                      {player.projections.next_3_rounds.toFixed(1)} / {" "}
+                      {player.projections.next_round.toFixed(1)} / 
+                      {player.projections.next_3_rounds.toFixed(1)} / 
                       {player.projections.next_6_rounds.toFixed(1)}
                     </td>
                   </tr>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import secrets
 from collections.abc import Callable
@@ -65,7 +66,13 @@ def _normalize_email(email: str) -> str:
 
 
 def _hash_password(password: str, salt: str) -> str:
-    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    return hashlib.scrypt(
+        password.encode(),
+        salt=salt.encode(),
+        n=2**14,
+        r=8,
+        p=1,
+    ).hex()
 
 
 def _public_user(record: dict[str, Any]) -> dict[str, str]:
@@ -112,7 +119,7 @@ def authenticate_user(email: str, password: str) -> tuple[dict[str, str], str]:
             if existing["email"] != normalized_email:
                 continue
 
-            if existing["password_hash"] != _hash_password(password, existing["salt"]):
+            if not hmac.compare_digest(existing["password_hash"], _hash_password(password, existing["salt"])):
                 break
 
             token = secrets.token_urlsafe(32)
