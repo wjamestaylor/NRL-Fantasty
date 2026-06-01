@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app import user_store
 
 
 client = TestClient(app)
@@ -66,6 +67,20 @@ def test_health_data_sources_returns_required_fields() -> None:
     assert "sources" in payload
     assert "features" in payload
     assert "player_breakeven" in payload["features"]
+
+
+def test_health_live_and_ready_endpoints_return_operational_payloads() -> None:
+    live_response = client.get("/health/live")
+    ready_response = client.get("/health/ready")
+
+    assert live_response.status_code == 200
+    assert live_response.json() == {"status": "ok"}
+
+    assert ready_response.status_code == 200
+    payload = ready_response.json()
+    assert payload["status"] == "ready"
+    assert payload["player_count"] > 0
+    assert payload["fixture_count"] > 0
 
 
 def test_health_data_sources_sources_include_monitoring_fields() -> None:
@@ -233,3 +248,74 @@ def test_planner_plan_endpoint_returns_phase4_payload() -> None:
     scenarios = {scenario["scenario"] for scenario in data["scenarios"]}
     assert scenarios == {"conservative", "balanced", "aggressive"}
     assert all(len(scenario["rounds"]) == 3 for scenario in data["scenarios"])
+
+
+def test_auth_register_login_and_saved_teams_flow(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(user_store, "STORE_PATH", tmp_path / "user_store.json")
+
+    register_response = client.post(
+        "/auth/register",
+        json={
+            "email": "coach@example.com",
+            "password": "securepass",
+            "display_name": "Coach",
+        },
+    )
+    assert register_response.status_code == 200
+    register_payload = register_response.json()
+    assert register_payload["user"]["email"] == "coach@example.com"
+    token = register_payload["token"]
+
+    me_response = client.get(
+        "/auth/me",
+        headers={"Authorization": "Bearer " + token},
+    )
+    assert me_response.status_code == 200
+    assert me_response.json()["display_name"] == "Coach"
+
+    save_response = client.post(
+        "/user-teams",
+        headers={"Authorization": "Bearer " + token},
+        json={
+            "name": "Round 12 setup",
+            "notes": "Balanced buy targets",
+            "team": {
+                "squad": ["P1", "P2", "P3"],
+                "bank": 175000,
+                "trades_available": 2,
+                "boosts_available": 1,
+                "strategy": "balanced",
+                "locked_players": ["P1"],
+                "must_sell": ["P3"],
+                "planning_horizon": 4,
+                "compare_all_scenarios": True,
+            },
+        },
+    )
+    assert save_response.status_code == 200
+    assert save_response.json()["team"]["planning_horizon"] == 4
+
+    login_response = client.post(
+        "/auth/login",
+        json={"email": "coach@example.com", "password": "securepass"},
+    )
+    assert login_response.status_code == 200
+    login_token = login_response.json()["token"]
+
+    list_response = client.get(
+        "/user-teams",
+        headers={"Authorization": "Bearer " + login_token},
+    )
+    assert list_response.status_code == 200
+    teams = list_response.json()
+    assert len(teams) == 1
+    assert teams[0]["name"] == "Round 12 setup"
+    assert teams[0]["team"]["locked_players"] == ["P1"]
+
+
+def test_saved_teams_require_authentication(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(user_store, "STORE_PATH", tmp_path / "user_store.json")
+
+    response = client.get("/user-teams")
+
+    assert response.status_code == 401

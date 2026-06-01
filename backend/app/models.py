@@ -157,3 +157,40 @@ class PlannerPlanResponse(BaseModel):
     cash_generation: CashGenerationOutlook
     squad_structure: SquadStructureScore
     scenarios: list[ScenarioPlannerResult]
+
+
+class AuthRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=4, max_length=255)
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+class UserProfile(BaseModel):
+    id: str
+    email: str
+    display_name: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserProfile
+
+
+class SavedTeamPayload(UserTeamImportRequest):
+    planning_horizon: int = Field(default=3, ge=1, le=6)
+    compare_all_scenarios: bool = False
+
+
+class SavedTeamCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    notes: str | None = Field(default=None, max_length=240)
+    team: SavedTeamPayload
+
+
+class SavedTeam(BaseModel):
+    id: str
+    name: str
+    notes: str | None = None
+    created_at: str
+    updated_at: str
+    team: SavedTeamPayload

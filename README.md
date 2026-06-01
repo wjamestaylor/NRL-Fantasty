@@ -46,12 +46,92 @@ MVP implementation for a **Fantasy NRL Trade Lab** with:
 - [x] Confidence scores on recommendations
 
 ### Phase 6 — Product polish
-- [ ] Navigation shared across all screens
-- [ ] Mobile-first responsive UX improvements
-- [ ] Saved user teams
-- [ ] Authentication
-- [ ] Visual charts for trends, projections, and planning
-- [ ] Deployment, CI, and production monitoring
+- [x] Navigation shared across all screens
+- [x] Mobile-first responsive UX improvements
+- [x] Saved user teams
+- [x] Authentication
+- [x] Visual charts for trends, projections, and planning
+- [x] Deployment, CI, and production monitoring
+
+## Phase 6 — Authentication and saved teams
+
+### `POST /auth/register`
+
+Create a lightweight user account for demo-friendly authentication.
+
+```json
+{
+  "email": "coach@example.com",
+  "password": "securepass",
+  "display_name": "Coach"
+}
+```
+
+### `POST /auth/login`
+
+Exchange credentials for a bearer token used by the saved-team endpoints.
+
+### `GET /auth/me`
+
+Return the current authenticated user.
+
+### `GET /user-teams`
+
+List the authenticated user's saved team configurations.
+
+### `POST /user-teams`
+
+Persist a team configuration for later reuse across sessions.
+
+```json
+{
+  "name": "Round 12 setup",
+  "notes": "Balanced buy targets",
+  "team": {
+    "squad": ["P1", "P2", "P3"],
+    "bank": 175000,
+    "trades_available": 2,
+    "boosts_available": 1,
+    "strategy": "balanced",
+    "locked_players": ["P1"],
+    "must_sell": ["P3"],
+    "planning_horizon": 4,
+    "compare_all_scenarios": true
+  }
+}
+```
+
+The frontend stores the bearer token locally and uses it to save and reload team setups on the Trade Lab and Planner screens.
+
+## Deployment and monitoring
+
+### CI
+
+GitHub Actions runs:
+
+- backend `python -m pytest -q`
+- frontend `npm ci`
+- frontend `npm run lint`
+- frontend `npm run build`
+
+Workflow file: `.github/workflows/ci.yml`
+
+### Container images
+
+- `backend/Dockerfile` runs FastAPI with `uvicorn`
+- `frontend/Dockerfile` builds a standalone Next.js server
+
+### Runtime environment
+
+- `NEXT_PUBLIC_API_BASE_URL` — public base URL for the FastAPI API used by the Next.js frontend
+- `FRONTEND_ORIGINS` — comma-separated list of allowed frontend origins for FastAPI CORS (defaults to local Next.js dev origins)
+
+### Monitoring probes
+
+- `GET /health/live` — liveness probe for uptime/load balancers
+- `GET /health/ready` — readiness probe with dataset counts
+- `GET /health/data-sources` — ingestion/source status
+- `GET /health/ingestion-log` — recent audit log entries
 
 ## Phase 3 — Trade recommendation API
 

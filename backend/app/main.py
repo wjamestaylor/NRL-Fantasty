@@ -1,4 +1,7 @@
-from fastapi import FastAPI, HTTPException, Query
+import os
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from .archive import VALID_DATASETS as _VALID_DATASETS
 from .archive import list_archived_dates, load_archived_snapshot
@@ -7,14 +10,35 @@ from .engine import build_planner_plan, project_player, recommend_trades
 from .feed_ingestion import DEFAULT_DATA_DIR
 from .ingestion_log import read_ingestion_log
 from .models import (
+    AuthRequest,
+    AuthResponse,
     PlannerPlanRequest,
     PlannerPlanResponse,
+    SavedTeam,
+    SavedTeamCreateRequest,
     TradeRecommendationResponse,
     TradeSimulationRequest,
+    UserProfile,
     UserTeamImportRequest,
 )
+from .user_store import authenticate_user, create_user, get_user_for_token, list_saved_teams, save_team
 
 app = FastAPI(title="Fantasy NRL Trade Lab API", version="0.1.0")
+
+_default_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+_configured_origins = [
+    origin.strip()
+    for origin in os.getenv("FRONTEND_ORIGINS", ",".join(_default_origins)).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_configured_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _rolling_average(values: list[float], window: int) -> float | None:
@@ -58,6 +82,63 @@ def _player_analytics_payload(player_id: str) -> dict:
         }
 
     raise HTTPException(status_code=404, detail="Player not found")
+
+
+def _get_current_user(authorization: str | None = Header(default=None)) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    token = authorization.split(" ", 1)[1].strip()
+    user = get_user_for_token(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    return user
+
+
+@app.get("/health/live")
+def get_live_health() -> dict:
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def get_ready_health() -> dict:
+    return {
+        "status": "ready",
+        "loaded_at": DATA_LOADED_AT,
+        "player_count": len(PLAYERS),
+        "fixture_count": len(FIXTURES),
+        "news_count": len(NEWS_SIGNALS),
+    }
+
+
+@app.post("/auth/register", response_model=AuthResponse)
+def post_auth_register(payload: AuthRequest) -> AuthResponse:
+    try:
+        user, token = create_user(
+            email=payload.email,
+            password=payload.password,
+            display_name=payload.display_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return AuthResponse(token=token, user=UserProfile(**user))
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+def post_auth_login(payload: AuthRequest) -> AuthResponse:
+    try:
+        user, token = authenticate_user(email=payload.email, password=payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    return AuthResponse(token=token, user=UserProfile(**user))
+
+
+@app.get("/auth/me", response_model=UserProfile)
+def get_auth_me(current_user: dict = Depends(_get_current_user)) -> UserProfile:
+    return UserProfile(**current_user)
 
 
 @app.get("/players")
@@ -104,6 +185,25 @@ def import_user_team(payload: UserTeamImportRequest) -> dict:
         "message": "Team imported",
         "team": payload.model_dump(),
     }
+
+
+@app.get("/user-teams", response_model=list[SavedTeam])
+def get_user_teams(current_user: dict = Depends(_get_current_user)) -> list[SavedTeam]:
+    return [SavedTeam(**team) for team in list_saved_teams(current_user["id"])]
+
+
+@app.post("/user-teams", response_model=SavedTeam)
+def post_user_team(
+    payload: SavedTeamCreateRequest,
+    current_user: dict = Depends(_get_current_user),
+) -> SavedTeam:
+    saved = save_team(
+        user_id=current_user["id"],
+        name=payload.name,
+        notes=payload.notes,
+        team=payload.team.model_dump(),
+    )
+    return SavedTeam(**saved)
 
 
 @app.post("/trade/recommend", response_model=TradeRecommendationResponse)
