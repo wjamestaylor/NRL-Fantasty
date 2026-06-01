@@ -520,6 +520,53 @@ def test_load_feed_bundle_uses_player_stats_website_when_configured(
     assert bundle.source_health["players"]["status"] == "website"
 
 
+def test_load_feed_bundle_falls_back_to_snapshot_when_player_website_scrape_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    players_path = tmp_path / "players.json"
+    fixtures_path = tmp_path / "fixtures.json"
+    news_path = tmp_path / "news.json"
+
+    _write_snapshot(
+        players_path,
+        [
+            {
+                "id": "P1",
+                "name": "Cameron Murray",
+                "team": "Rabbitohs",
+                "positions": ["MID"],
+                "price": 760000,
+                "season_average": 60,
+                "last_3_average": 62,
+                "minutes_adjusted_base": 61,
+                "opponent_modifier": 2,
+                "role_change_modifier": 0,
+                "role_risk": 0.1,
+                "injury_risk": 0.1,
+                "job_security_risk": 0.02,
+                "bye_rounds": [13],
+            }
+        ],
+    )
+    _write_snapshot(fixtures_path, [{"round": 1, "home_team": "Broncos", "away_team": "Roosters"}])
+    _write_snapshot(news_path, [{"player_id": "P1", "signal": "fit", "confidence": "high"}])
+
+    monkeypatch.setenv(feed_ingestion.PLAYERS_SNAPSHOT_PATH_ENV, str(players_path))
+    monkeypatch.setenv(feed_ingestion.FIXTURES_SNAPSHOT_PATH_ENV, str(fixtures_path))
+    monkeypatch.setenv(feed_ingestion.NEWS_SNAPSHOT_PATH_ENV, str(news_path))
+    monkeypatch.setenv(feed_ingestion.PLAYER_STATS_WEBSITE_URL_ENV, "https://example.com/players")
+    def _raise_scrape_failure(_url: str) -> list[Player]:
+        raise RuntimeError("website scrape failed")
+
+    monkeypatch.setattr(feed_ingestion, "scrape_player_stats", _raise_scrape_failure)
+
+    bundle = feed_ingestion.load_feed_bundle()
+
+    assert bundle.players[0].id == "P1"
+    assert bundle.source_health["players"]["status"] == "snapshot_fallback"
+    assert "last_error" in bundle.source_health["players"]
+
+
 def test_load_feed_bundle_loads_team_game_stats_from_website(tmp_path: Path, monkeypatch) -> None:
     players_path = tmp_path / "players.json"
     fixtures_path = tmp_path / "fixtures.json"

@@ -65,14 +65,14 @@ def _normalize_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
-def _parse_number(value: Any, *, cast_type: type[int] | type[float], default: int | float) -> int | float:
+def _parse_number(value: Any, *, target_type: type[int] | type[float], default: int | float) -> int | float:
     if value is None:
         return default
     cleaned = re.sub(r"[^0-9.+-]", "", str(value))
     if not cleaned:
         return default
     try:
-        return cast_type(cleaned)
+        return target_type(cleaned)
     except ValueError:
         return default
 
@@ -142,32 +142,32 @@ def scrape_player_stats(url: str) -> list[Player]:
 
             positions_raw = row.get("positions") or row.get("position") or row.get("pos") or "MID"
             positions = [value.strip() for value in re.split(r"[,/]", positions_raw) if value.strip()] or ["MID"]
-            season_average = float(_parse_number(row.get(avg_key), cast_type=float, default=0.0))
+            season_average = float(_parse_number(row.get(avg_key), target_type=float, default=0.0))
             last_3_average = float(
                 _parse_number(
                     row.get("last_3_average") or row.get("last_3") or row.get("last3"),
-                    cast_type=float,
+                    target_type=float,
                     default=season_average,
                 )
             )
             minutes_adjusted_base = float(
                 _parse_number(
                     row.get("minutes_adjusted_base") or row.get("minutes") or row.get("avg_minutes"),
-                    cast_type=float,
+                    target_type=float,
                     default=season_average,
                 )
             )
-            price = int(_parse_number(row.get("price") or row.get("salary"), cast_type=float, default=0))
+            price = int(_parse_number(row.get("price") or row.get("salary"), target_type=int, default=0))
             breakeven_raw = row.get("breakeven") or row.get("be")
             breakeven: int | None = None
             if breakeven_raw:
-                breakeven = int(_parse_number(breakeven_raw, cast_type=float, default=0))
+                breakeven = int(_parse_number(breakeven_raw, target_type=int, default=0))
 
             bye_rounds_raw = row.get("bye_rounds") or row.get("bye") or ""
             bye_rounds = [
-                int(_parse_number(value, cast_type=float, default=0))
+                int(_parse_number(value, target_type=int, default=0))
                 for value in re.split(r"[,/ ]+", bye_rounds_raw.strip())
-                if value.strip() and int(_parse_number(value, cast_type=float, default=0)) > 0
+                if value.strip() and int(_parse_number(value, target_type=int, default=0)) > 0
             ]
 
             players.append(
@@ -181,15 +181,15 @@ def scrape_player_stats(url: str) -> list[Player]:
                     last_3_average=last_3_average,
                     minutes_adjusted_base=minutes_adjusted_base,
                     opponent_modifier=float(
-                        _parse_number(row.get("opponent_modifier"), cast_type=float, default=0.0)
+                        _parse_number(row.get("opponent_modifier"), target_type=float, default=0.0)
                     ),
                     role_change_modifier=float(
-                        _parse_number(row.get("role_change_modifier"), cast_type=float, default=0.0)
+                        _parse_number(row.get("role_change_modifier"), target_type=float, default=0.0)
                     ),
-                    role_risk=float(_parse_number(row.get("role_risk"), cast_type=float, default=0.1)),
-                    injury_risk=float(_parse_number(row.get("injury_risk"), cast_type=float, default=0.1)),
+                    role_risk=float(_parse_number(row.get("role_risk"), target_type=float, default=0.1)),
+                    injury_risk=float(_parse_number(row.get("injury_risk"), target_type=float, default=0.1)),
                     job_security_risk=float(
-                        _parse_number(row.get("job_security_risk"), cast_type=float, default=0.05)
+                        _parse_number(row.get("job_security_risk"), target_type=float, default=0.05)
                     ),
                     breakeven=breakeven,
                     bye_rounds=bye_rounds,
@@ -231,11 +231,11 @@ def scrape_team_game_stats(url: str) -> list[TeamGameStat]:
             if not all((round_key, team_key, opponent_key, points_for_key, points_against_key)):
                 continue
 
-            round_number = int(_parse_number(row.get(round_key), cast_type=float, default=0))
+            round_number = int(_parse_number(row.get(round_key), target_type=int, default=0))
             team = (row.get(team_key) or "").strip()
             opponent = (row.get(opponent_key) or "").strip()
-            points_for = int(_parse_number(row.get(points_for_key), cast_type=float, default=0))
-            points_against = int(_parse_number(row.get(points_against_key), cast_type=float, default=0))
+            points_for = int(_parse_number(row.get(points_for_key), target_type=int, default=0))
+            points_against = int(_parse_number(row.get(points_against_key), target_type=int, default=0))
             if round_number < 1 or not team or not opponent:
                 continue
 
